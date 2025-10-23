@@ -1,0 +1,4 @@
+body { min-height: 100vh; }
+.navbar-brand { font-weight: bold; letter-spacing: 0.5px; }
+.table th, .table td { vertical-align: middle; }
+#location-status { font-style: italic; }

@@ -1,0 +1,17 @@
+{
+  "name": "disaster-management-app",
+  "version": "1.0.0",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "seed": "node server/seed.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "mongodb": "^5.9.0",
+    "redis": "^5.3.1",
+    "cookie-parser": "^1.4.6",
+    "dotenv": "^16.4.5",
+    "uuid": "^9.0.1"
+  }
+}

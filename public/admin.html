@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Disaster Admin Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link href="/libs/bootstrap.min.css" rel="stylesheet" />
+  <link href="/css/style.css" rel="stylesheet" />
+
+  <script src="/libs/jquery.min.js"></script>
+  <script src="/libs/bootstrap.min.js"></script>
+  <script src="/js/admin.js"></script>
+</head>
+<body class="bg-white">
+  <nav class="navbar navbar-expand navbar-dark bg-primary">
+    <div class="container">
+      <a class="navbar-brand mb-0 h1" href="/">Disaster Admin</a>
+      <a href="/" class="btn btn-outline-light ms-auto">Home</a>
+      <button class="btn btn-danger ms-2 d-none" id="admin-logout">Logout</button>
+    </div>
+  </nav>
+
+  <div class="container my-4" id="login-section">
+    <h3>Admin Login</h3>
+    <form id="login-form" class="w-50 mx-auto">
+      <div class="mb-3">
+        <label for="username">Username</label>
+        <input class="form-control" name="username" id="username" autocomplete="username" />
+      </div>
+      <div class="mb-3">
+        <label for="password">Password</label>
+        <input type="password" class="form-control" name="password" id="password" autocomplete="current-password" />
+      </div>
+      <button class="btn btn-primary w-100" type="submit">Login</button>
+      <div class="form-text text-danger mt-2 d-none" id="login-error"></div>
+    </form>
+  </div>
+
+  <div class="container my-4 d-none" id="admin-dashboard" style="padding-top: 20px;">
+
+    <!-- Toolbar with both Add buttons -->
+    <div class="d-flex justify-content-start mb-3 mt-5 gap-2">
+      <button class="btn btn-success btn-sm" id="btn-add-message">+ Add Disaster Message</button>
+      <button class="btn btn-success btn-sm" id="btn-add-resource">+ Add Nearby Resource</button>
+    </div>
+
+    <!-- Disaster Messages section -->
+    <div class="mb-4">
+      <h4>Disaster Messages</h4>
+      <table class="table table-bordered align-middle" id="messages-table">
+        <thead>
+          <tr>
+            <th>Title</th>
+            <th>Severity</th>
+            <th>Area</th>
+            <th>Active</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="messages-body"></tbody>
+      </table>
+    </div>
+
+    <!-- Nearby Resources section -->
+    <div class="mb-4">
+      <h4>Nearby Resources</h4>
+      <table class="table table-bordered align-middle" id="resources-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Type</th>
+            <th>Phones</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="resources-body"></tbody>
+      </table>
+    </div>
+
+    <!-- Admins section -->
+    <h5>Admins</h5>
+    <table class="table table-bordered" id="admins-table">
+      <thead>
+        <tr>
+          <th>Username</th>
+          <th>Name</th>
+          <th>Phone</th>
+          <th>Created At</th>
+        </tr>
+      </thead>
+      <tbody id="admins-body"></tbody>
+    </table>
+  </div>
+
+  <!-- Modal for editing/adding messages -->
+  <div class="modal fade" id="messageModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+      <form class="modal-content" id="message-form">
+        <div class="modal-header">
+          <h5 class="modal-title" id="messageModalLabel">Message</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" name="id" id="msg-id" />
+          <div class="mb-2">
+            <label>Title</label>
+            <input name="title" id="msg-title" class="form-control" required />
+          </div>
+          <div class="mb-2">
+            <label>Body</label>
+            <textarea name="body" id="msg-body" class="form-control" required></textarea>
+          </div>
+          <div class="mb-2">
+            <label>Severity</label>
+            <select name="severity" id="msg-severity" class="form-select" required>
+              <option value="info">Info</option>
+              <option value="warning">Warning</option>
+              <option value="critical">Critical</option>
+            </select>
+          </div>
+          <div class="mb-2">
+            <label>Area</label>
+            <input name="area" id="msg-area" class="form-control" />
+          </div>
+          <div class="form-check mb-2">
+            <input type="checkbox" class="form-check-input" id="msg-active" name="active" />
+            <label class="form-check-label">Active (broadcast)</label>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" type="button" data-bs-dismiss="modal">Cancel</button>
+          <button class="btn btn-primary" type="submit" id="msg-save-btn">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal for resources -->
+  <div class="modal fade" id="resourceModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+      <form class="modal-content" id="resource-form">
+        <div class="modal-header">
+          <h5 class="modal-title" id="resourceModalLabel">Resource</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" name="id" id="res-id" />
+          <div class="mb-2">
+            <label>Name</label>
+            <input name="name" id="res-name" class="form-control" required />
+          </div>
+          <div class="mb-2">
+            <label>Type</label>
+            <select name="type" id="res-type" class="form-select" required>
+              <option value="hospital">Hospital</option>
+              <option value="rescue">Rescue</option>
+              <option value="shelter">Shelter</option>
+            </select>
+          </div>
+          <div class="mb-2">
+            <label>Phones (comma separated)</label>
+            <input name="phones" id="res-phones" class="form-control" />
+          </div>
+          <div class="mb-2">
+            <label>Address</label>
+            <input name="address" id="res-address" class="form-control" />
+          </div>
+          <div class="mb-2">
+            <label>Location (lng,lat)</label>
+            <input name="location" id="res-location" class="form-control" placeholder="77.5946,12.9716" required />
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" type="button" data-bs-dismiss="modal">Cancel</button>
+          <button class="btn btn-primary" type="submit" id="res-save-btn">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Disaster Management System</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link href="libs/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="bg-light">
+  <nav class="navbar navbar-expand navbar-dark bg-primary">
+    <div class="container">
+      <a class="navbar-brand mb-0 h1" href="/">Disaster Management</a>
+      <a href="/admin/login" class="btn btn-outline-light ms-auto">Admin Login</a>
+    </div>
+  </nav>
+  <div class="container my-4">
+    <div id="messages-area"></div>
+    <h3>Nearby Resources</h3>
+    <table class="table table-bordered table-striped d-none" id="resources-table">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Phones</th>
+          <th>Address</th>
+          <th>Distance (m)</th>
+        </tr>
+      </thead>
+      <tbody id="resources-body"></tbody>
+    </table>
+    <div class="alert alert-warning d-none" id="no-resources">
+      No nearby resources found.
+    </div>
+  </div>
+  <script src="libs/jquery.min.js"></script>
+  <script src="libs/bootstrap.min.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
