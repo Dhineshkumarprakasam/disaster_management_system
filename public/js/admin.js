@@ -1,27 +1,50 @@
 // Message Alert Dialog Helper
 function showMessage(title, message) {
-  // Set content
-  const titleEl = document.getElementById('messageAlertTitle');
-  const bodyEl = document.getElementById('messageAlertBody');
-  if (titleEl) titleEl.textContent = title;
-  if (bodyEl) bodyEl.textContent = message;
-  
-  // Show modal
-  const modal = document.getElementById('messageAlertModal');
-  if (modal) {
-    try {
-      // Try Bootstrap modal first
-      const bsModal = new bootstrap.Modal(modal);
-      bsModal.show();
-    } catch (e) {
-      try {
-        // Fallback to jQuery method
-        $('#messageAlertModal').modal('show');
-      } catch (e2) {
-        console.error('Could not show modal:', e, e2);
-        alert(title + ': ' + message);
-      }
+  try {
+    console.log('[showMessage] called with:', title, message);
+    
+    // Set content
+    const titleEl = document.getElementById('messageAlertTitle');
+    const bodyEl = document.getElementById('messageAlertBody');
+    
+    if (titleEl) {
+      titleEl.textContent = title;
+      console.log('[showMessage] Title element found and updated');
+    } else {
+      console.warn('[showMessage] Title element not found');
     }
+    
+    if (bodyEl) {
+      bodyEl.textContent = message;
+      console.log('[showMessage] Body element found and updated');
+    } else {
+      console.warn('[showMessage] Body element not found');
+    }
+    
+    // Show modal using Bootstrap
+    const modal = document.getElementById('messageAlertModal');
+    if (modal) {
+      console.log('[showMessage] Modal element found');
+      try {
+        // Try Bootstrap modal API
+        const bsModal = new bootstrap.Modal(modal, { backdrop: 'static', keyboard: false });
+        bsModal.show();
+        console.log('[showMessage] Bootstrap modal shown successfully');
+      } catch (bootstrapError) {
+        console.warn('[showMessage] Bootstrap modal error, trying jQuery:', bootstrapError);
+        try {
+          // Fallback to jQuery Bootstrap modal
+          $('#messageAlertModal').modal('show');
+          console.log('[showMessage] jQuery modal shown successfully');
+        } catch (jqueryError) {
+          console.error('[showMessage] jQuery modal error:', jqueryError);
+        }
+      }
+    } else {
+      console.error('[showMessage] messageAlertModal element not found in DOM');
+    }
+  } catch (e) {
+    console.error('[showMessage] Unexpected error:', e);
   }
 }
 

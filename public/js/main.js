@@ -6,25 +6,70 @@ let currentUser = null;
 const mapPickers = {};
 const defaultMapCenter = [26.1445, 91.7362];
 
+console.log('[main.js] Script loaded successfully - showMessage modal system is ready');
+
 // Message Alert Dialog Helper
 function showMessage(title, message) {
-  // Set content
-  const titleEl = document.getElementById('messageAlertTitle');
-  const bodyEl = document.getElementById('messageAlertBody');
-  if (titleEl) titleEl.textContent = title;
-  if (bodyEl) bodyEl.textContent = message;
-  
-  // Show modal (using custom modal system)
-  const modal = document.getElementById('messageAlertModal');
-  if (modal) {
-    modal.classList.add('active');
+  try {
+    console.log('[showMessage] called with:', title, message);
+    
+    // Set content
+    const titleEl = document.getElementById('messageAlertTitle');
+    const bodyEl = document.getElementById('messageAlertBody');
+    
+    if (titleEl) {
+      titleEl.textContent = title;
+      console.log('[showMessage] Title element found and updated');
+    } else {
+      console.warn('[showMessage] Title element not found');
+    }
+    
+    if (bodyEl) {
+      bodyEl.textContent = message;
+      console.log('[showMessage] Body element found and updated');
+    } else {
+      console.warn('[showMessage] Body element not found');
+    }
+    
+    // Show modal
+    const modal = document.getElementById('messageAlertModal');
+    if (modal) {
+      console.log('[showMessage] Modal element found');
+      
+      // Ensure display is not none
+      modal.style.removeProperty('display');
+      
+      // Add active class
+      modal.classList.add('active');
+      
+      // Force display with inline styles
+      modal.style.display = 'flex';
+      modal.style.position = 'fixed';
+      modal.style.top = '0';
+      modal.style.left = '0';
+      modal.style.width = '100%';
+      modal.style.height = '100%';
+      modal.style.zIndex = '10000';
+      
+      console.log('[showMessage] Modal displayed successfully');
+    } else {
+      console.error('[showMessage] messageAlertModal element not found in DOM');
+    }
+  } catch (e) {
+    console.error('[showMessage] Error:', e);
   }
 }
 
 function closeMessageAlert() {
-  const modal = document.getElementById('messageAlertModal');
-  if (modal) {
-    modal.classList.remove('active');
+  try {
+    const modal = document.getElementById('messageAlertModal');
+    if (modal) {
+      modal.classList.remove('active');
+      modal.style.display = 'none';
+      console.log('[closeMessageAlert] Modal closed');
+    }
+  } catch (e) {
+    console.error('[closeMessageAlert] Error:', e);
   }
 }
 
