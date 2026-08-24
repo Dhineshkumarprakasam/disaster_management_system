@@ -2,39 +2,622 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Disaster Management System</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>National Disaster Management System | Government of India</title>
   <link href="libs/bootstrap.min.css" rel="stylesheet">
   <link rel="stylesheet" href="css/style.css">
-</head>
-<body class="bg-light">
-  <nav class="navbar navbar-expand navbar-dark bg-primary">
-    <div class="container">
-      <a class="navbar-brand mb-0 h1" href="/">Disaster Management</a>
-      <a href="/admin/login" class="btn btn-outline-light ms-auto">Admin Login</a>
-    </div>
-  </nav>
-  <div class="container my-4">
-    <div id="messages-area"></div>
-    <h3>Nearby Resources</h3>
-    <table class="table table-bordered table-striped d-none" id="resources-table">
-      <thead>
-        <tr>
-          <th>Name</th>
-          <th>Type</th>
-          <th>Phones</th>
-          <th>Address</th>
-          <th>Distance (m)</th>
-        </tr>
-      </thead>
-      <tbody id="resources-body"></tbody>
-    </table>
-    <div class="alert alert-warning d-none" id="no-resources">
-      No nearby resources found.
-    </div>
-  </div>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
   <script src="libs/jquery.min.js"></script>
   <script src="libs/bootstrap.min.js"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+</head>
+<body>
+
+  <!-- Top Emergency Hotline Bar -->
+  <div class="top-hotline-bar">
+    <div class="hotline-items">
+      <div>NDRF: <span>011-24363260</span></div>
+      <div>Disaster Helpline: <span>1078</span></div>
+      <div>Emergency Response: <span>112</span></div>
+      <div>Fire: <span>101</span></div>
+      <div>Ambulance: <span>108</span></div>
+    </div>
+    <div>National Disaster Management Authority (NDMA) • Government of India</div>
+  </div>
+
+  <!-- Main Government Header -->
+  <header class="goi-navbar">
+    <div class="navbar-container">
+      <div class="brand-box">
+        <div class="emblem-icon">ND</div>
+        <div class="brand-title">
+          <h1>National Disaster Management System</h1>
+          <div class="brand-sub">Government of India • NDMA</div>
+        </div>
+      </div>
+
+      <!-- Auth State Control (Login / Logout) -->
+      <div id="auth-nav-container">
+        <!-- Rendered dynamically by JS based on actual login session -->
+        <button class="btn btn-primary" onclick="openLoginModal()">Official / Staff Sign In</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Live Emergency Alert Ticker -->
+  <div class="ticker-banner">
+    <span class="ticker-tag">LIVE ALERT</span>
+    <div class="ticker-text" id="alert-ticker">
+      Brahmaputra Flood Warning active in Kamrup District • NDRF Battalion 1 Dispatched • Coast Guard on standby in Gujarat
+    </div>
+  </div>
+
+  <!-- Main Application Container -->
+  <main class="content-container">
+
+    <!-- =================================================================== -->
+    <!-- 1. GUEST PUBLIC PORTAL (Default view for unauthenticated visitors) -->
+    <!-- =================================================================== -->
+    <div id="portal-guest" class="view-section">
+
+      <!-- Quick Citizen Emergency Action Cards -->
+      <div class="grid-2" style="margin-bottom:20px;">
+        <div class="card-box" style="background:#fff7ed; border-color:#fed7aa; text-align:center;">
+          <h3 style="color:#c2410c; margin-bottom:6px;">Witnessed a Disaster Incident?</h3>
+          <p style="font-size:0.85rem; color:#9a3412; margin-bottom:12px;">Report disaster events for official government validation and emergency team response.</p>
+          <button class="btn btn-saffron" onclick="openReportModal()">Report Disaster Incident</button>
+        </div>
+
+        <div class="card-box" style="background:#fef2f2; border-color:#fecaca; text-align:center;">
+          <h3 style="color:#b91c1c; margin-bottom:6px;">Trapped or Need Emergency Help?</h3>
+          <p style="font-size:0.85rem; color:#991b1b; margin-bottom:12px;">Submit an urgent request for evacuation, medical aid, food, or emergency shelter.</p>
+          <button class="btn btn-danger" onclick="openSosModal()">Submit SOS Request</button>
+        </div>
+      </div>
+
+      <!-- Published Verified Alerts & Nearby Emergency Centers -->
+      <div class="grid-2">
+        <div class="card-box">
+          <div class="card-title-bar">
+            <h3>Published Verified Disaster Alerts</h3>
+            <span class="badge badge-success">Govt Verified</span>
+          </div>
+          <div id="public-incidents-container">
+            <!-- Dynamic published alerts -->
+          </div>
+        </div>
+
+        <div class="card-box">
+          <div class="card-title-bar">
+            <h3>Nearby Emergency Centers & Shelters</h3>
+          </div>
+          <div id="public-resources-container">
+            <!-- Dynamic emergency centers -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Community Actions -->
+      <div class="card-box">
+        <div class="card-title-bar">
+          <h3>Community Services & Volunteer Applications</h3>
+        </div>
+        <div class="grid-2">
+          <div>
+            <h4 style="font-size:0.95rem; margin-bottom:6px;">Contact Local Verified Volunteers</h4>
+            <p style="font-size:0.82rem; color:var(--text-muted); margin-bottom:10px;">Find government-approved active volunteers in your district.</p>
+            <button class="btn btn-outline btn-sm" onclick="openVolunteersDirectoryModal()">Browse Volunteers Directory</button>
+          </div>
+          <div>
+            <h4 style="font-size:0.95rem; margin-bottom:6px;">Apply to Join Volunteer Response Force</h4>
+            <p style="font-size:0.82rem; color:var(--text-muted); margin-bottom:10px;">Register your details & skillsets to assist official disaster teams.</p>
+            <button class="btn btn-outline btn-sm" onclick="openVolunteerApplyModal()">Apply as Volunteer</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- =================================================================== -->
+    <!-- 2. SUPER ADMIN DASHBOARD (Strictly shown ONLY after Admin login) -->
+    <!-- =================================================================== -->
+    <div id="portal-admin" class="view-section" style="display:none;">
+      <div class="role-banner">
+        <div>
+          <h2 id="admin-welcome-text">Super Admin Command Center</h2>
+          <div style="font-size:0.82rem; opacity:0.9;">Sole administrative authority to manage official officers & system accounts</div>
+        </div>
+        <button class="btn btn-outline btn-sm" onclick="handleLogout()">Sign Out</button>
+      </div>
+
+      <div class="grid-2">
+        <!-- Manage Official Officers (Add & Remove Officers) -->
+        <div class="card-box">
+          <div class="card-title-bar">
+            <h3>Official Department Officers List</h3>
+            <button class="btn btn-saffron btn-sm" onclick="openAddOfficerModal()">+ Add Officer</button>
+          </div>
+          <div style="overflow-x:auto;">
+            <table class="table-minimal">
+              <thead>
+                <tr>
+                  <th>Officer Name</th>
+                  <th>Department</th>
+                  <th>Designation</th>
+                  <th>Phone</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="admin-officers-tbody">
+                <!-- Dynamic officer rows -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Create Govt Staff / Admin Accounts -->
+        <div class="card-box">
+          <div class="card-title-bar">
+            <h3>Create Official Staff / Admin Account</h3>
+          </div>
+          <form id="create-account-form" onsubmit="handleCreateAccount(event)">
+            <div class="form-group" style="margin-bottom:10px;">
+              <label class="form-label">Role Type *</label>
+              <select id="acc-role" class="form-select">
+                <option value="government">Government Staff / Officer</option>
+                <option value="admin">Super Admin</option>
+              </select>
+            </div>
+            <div class="grid-2" style="margin-bottom:10px;">
+              <div>
+                <label class="form-label">Full Name *</label>
+                <input type="text" id="acc-name" class="form-control" placeholder="Official Name" required>
+              </div>
+              <div>
+                <label class="form-label">Username *</label>
+                <input type="text" id="acc-username" class="form-control" placeholder="Choose username" required>
+              </div>
+            </div>
+            <div class="grid-2" style="margin-bottom:10px;">
+              <div>
+                <label class="form-label">Password *</label>
+                <input type="password" id="acc-password" class="form-control" placeholder="Password" required>
+              </div>
+              <div>
+                <label class="form-label">Department</label>
+                <input type="text" id="acc-dept" class="form-control" value="Disaster Management Department">
+              </div>
+            </div>
+            <div id="acc-district-row" class="grid-2" style="margin-bottom:12px;">
+              <div>
+                <label class="form-label">Assigned District <span style="color:#c2410c;">*</span></label>
+                <select id="acc-district" class="form-select" required>
+                  <option value="">Select state first</option>
+                </select>
+              </div>
+              <div>
+                <label class="form-label">State</label>
+                <select id="acc-state" class="form-select" required>
+                  <option value="">Loading states...</option>
+                </select>
+              </div>
+            </div>
+            <button type="submit" class="btn btn-primary" style="width:100%;">+ Create Official Account</button>
+          </form>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- =================================================================== -->
+    <!-- 3. GOVERNMENT STAFF DASHBOARD (Strictly shown ONLY after Govt login) -->
+    <!-- =================================================================== -->
+    <div id="portal-government" class="view-section" style="display:none;">
+      <div class="role-banner">
+        <div>
+          <h2 id="govt-welcome-text">Government Official Command Center</h2>
+          <div id="govt-district-badge" style="font-size:0.82rem; opacity:0.9; margin-top:4px;">
+            Validate incidents, dispatch departments &amp; manage volunteers
+          </div>
+        </div>
+        <button class="btn btn-outline btn-sm" onclick="handleLogout()">Sign Out</button>
+      </div>
+
+      <!-- Department Dispatch Console -->
+      <div class="card-box">
+        <div class="card-title-bar">
+          <h3>Official Department Dispatch Console</h3>
+        </div>
+        <form id="dispatch-form" onsubmit="handleDispatchSubmit(event)" class="grid-3">
+          <div>
+            <label class="form-label">Target Incident *</label>
+            <select id="dispatch-inc-select" class="form-select" required>
+              <!-- Dynamic options -->
+            </select>
+          </div>
+          <div>
+            <label class="form-label">Department to Dispatch *</label>
+            <select id="dispatch-dept-select" class="form-select" required>
+              <option value="NDRF (National Disaster Response Force)">NDRF Battalion</option>
+              <option value="Police Department">Police Response (112)</option>
+              <option value="Fire & Rescue Service">Fire & Rescue Service (101)</option>
+              <option value="Ambulance & Medical Emergency">Ambulance Emergency (108)</option>
+              <option value="Indian Coast Guard">Indian Coast Guard</option>
+            </select>
+          </div>
+          <div style="display:flex; align-items:flex-end;">
+            <button type="submit" class="btn btn-danger" style="width:100%;">⚡ Trigger Official Dispatch</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="grid-2">
+        <!-- Incident Validation Queue -->
+        <div class="card-box">
+          <div class="card-title-bar">
+            <h3>⏳ Pending Incident Reports Queue</h3>
+            <span id="govt-district-scope-badge" class="badge badge-info" style="font-size:0.75rem;"></span>
+          </div>
+          <div id="govt-pending-incidents">
+            <!-- Dynamic pending list -->
+          </div>
+        </div>
+
+        <!-- Volunteer Applications Queue -->
+        <div class="card-box">
+          <div class="card-title-bar">
+            <h3>Volunteer Applications Queue</h3>
+          </div>
+          <div id="govt-volunteer-apps">
+            <!-- Dynamic apps list -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Call & Assign Volunteer -->
+      <div class="card-box">
+        <div class="card-title-bar">
+          <h3>Call & Assign Approved Volunteer to Emergency Task</h3>
+        </div>
+        <form id="assign-form" onsubmit="handleAssignSubmit(event)" class="grid-3">
+          <div>
+            <label class="form-label">Incident / SOS Request *</label>
+            <select id="assign-target" class="form-select" required></select>
+          </div>
+          <div>
+            <label class="form-label">Select Volunteer *</label>
+            <select id="assign-vol" class="form-select" required></select>
+          </div>
+          <div style="display:flex; align-items:flex-end;">
+            <button type="submit" class="btn btn-primary" style="width:100%;">Call & Assign Volunteer</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+
+    <!-- =================================================================== -->
+    <!-- 4. VOLUNTEER WORKSPACE (Strictly shown ONLY after Volunteer login) -->
+    <!-- =================================================================== -->
+    <div id="portal-volunteer" class="view-section" style="display:none;">
+      <div class="role-banner">
+        <div>
+          <h2 id="vol-welcome-text">Volunteer Emergency Task Portal</h2>
+          <div style="font-size:0.82rem; opacity:0.9;">View your assigned emergency rescue tasks & update completion status</div>
+        </div>
+        <button class="btn btn-outline btn-sm" onclick="handleLogout()">Sign Out</button>
+      </div>
+
+      <div class="card-box">
+        <div class="card-title-bar">
+          <h3>My Assigned Emergency Rescue Tasks</h3>
+        </div>
+        <div id="volunteer-tasks-container">
+          <!-- Dynamic tasks -->
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+
+  <!-- =================================================================== -->
+  <!-- MODAL DIALOGS -->
+  <!-- =================================================================== -->
+
+  <!-- 1. Report Disaster Modal -->
+  <div class="modal-overlay" id="modal-report">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Report Disaster Incident</h3>
+        <button style="border:none; background:none; cursor:pointer;" onclick="closeReportModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <form id="report-form" onsubmit="submitReportForm(event)">
+          <div style="margin-bottom:10px;">
+            <label class="form-label">Disaster Title *</label>
+            <input type="text" id="rep-title" class="form-control" placeholder="e.g. Flash Flood embankment breach" required>
+          </div>
+          <div class="grid-2" style="margin-bottom:10px;">
+            <div>
+              <label class="form-label">Category</label>
+              <select id="rep-cat" class="form-select">
+                <option value="Flood">Flood</option>
+                <option value="Cyclone">Cyclone</option>
+                <option value="Landslide">Landslide</option>
+                <option value="Fire">Fire</option>
+              </select>
+            </div>
+            <div>
+              <label class="form-label">Severity *</label>
+              <select id="rep-sev" class="form-select">
+                <option value="critical">CRITICAL</option>
+                <option value="warning">WARNING</option>
+              </select>
+            </div>
+          </div>
+          <div class="grid-2" style="margin-bottom:10px;">
+            <div>
+              <label class="form-label">State *</label>
+                <input type="text" id="rep-state" class="form-control" placeholder="Select on map" readonly required>
+            </div>
+            <div>
+              <label class="form-label">Contact Phone *</label>
+              <input type="tel" id="rep-phone" class="form-control" placeholder="+91 98765 43210" required>
+            </div>
+          </div>
+          <div class="grid-2" style="margin-bottom:10px;">
+            <div>
+              <label class="form-label">District *</label>
+                <input type="text" id="rep-district" class="form-control" placeholder="Select on map" readonly required>
+            </div>
+            <div>
+              <label class="form-label">Locality / Landmark *</label>
+                <input type="text" id="rep-area" class="form-control" placeholder="Enter a landmark or edit the map address" required>
+            </div>
+          </div>
+          <div style="margin-bottom:12px;">
+            <label class="form-label">Pin the exact incident location *</label>
+            <div class="map-search-row">
+              <input type="text" id="rep-pincode" class="form-control" inputmode="numeric" maxlength="6" placeholder="Enter 6-digit pincode">
+              <button type="button" class="btn btn-primary" onclick="searchMapByPincode('rep')">Find nearby places</button>
+            </div>
+            <div class="map-search-results" id="rep-map-results"></div>
+            <div class="map-picker" id="rep-map"></div>
+            <button type="button" class="btn btn-outline btn-sm map-locate-button" onclick="locateMap('rep')">Use my current location</button>
+            <div class="map-picker-status" id="rep-map-status">Click the map or use your current location.</div>
+          </div>
+          <div style="margin-bottom:12px;">
+            <label class="form-label">Description *</label>
+            <textarea id="rep-desc" class="form-control" placeholder="Provide details on trapped persons, water levels..." required></textarea>
+          </div>
+          <button type="submit" class="btn btn-danger" style="width:100%;">Submit Incident for Validation</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. SOS Request Modal -->
+  <div class="modal-overlay" id="modal-sos">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>🆘 Submit Emergency SOS Request</h3>
+        <button style="border:none; background:none; cursor:pointer;" onclick="closeSosModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <form id="sos-form" onsubmit="submitSosForm(event)">
+          <div style="margin-bottom:10px;">
+            <label class="form-label">Help Needed *</label>
+            <select id="sos-type" class="form-select">
+              <option value="rescue">Boat Evacuation Rescue</option>
+              <option value="medical">Medical Aid / Medicines</option>
+              <option value="food">Food & Water</option>
+              <option value="shelter">Emergency Shelter</option>
+            </select>
+          </div>
+          <div class="grid-2" style="margin-bottom:10px;">
+            <div>
+              <label class="form-label">Full Name *</label>
+              <input type="text" id="sos-name" class="form-control" placeholder="Your name" required>
+            </div>
+            <div>
+              <label class="form-label">Phone *</label>
+              <input type="tel" id="sos-phone" class="form-control" placeholder="+91 98765 43210" required>
+            </div>
+          </div>
+          <div style="margin-bottom:10px;">
+            <label class="form-label">Exact Location *</label>
+            <input type="text" id="sos-loc" class="form-control" placeholder="Enter a landmark or edit the map address" required>
+          </div>
+          <div class="grid-2" style="margin-bottom:10px;">
+            <div>
+              <label class="form-label">District *</label>
+              <input type="text" id="sos-district" class="form-control" placeholder="Select on map" readonly required>
+            </div>
+            <div>
+              <label class="form-label">State *</label>
+              <input type="text" id="sos-state" class="form-control" placeholder="Select on map" readonly required>
+            </div>
+          </div>
+          <div style="margin-bottom:12px;">
+            <label class="form-label">Pin the exact SOS location *</label>
+            <div class="map-search-row">
+              <input type="text" id="sos-pincode" class="form-control" inputmode="numeric" maxlength="6" placeholder="Enter 6-digit pincode">
+              <button type="button" class="btn btn-primary" onclick="searchMapByPincode('sos')">Find nearby places</button>
+            </div>
+            <div class="map-search-results" id="sos-map-results"></div>
+            <div class="map-picker" id="sos-map"></div>
+            <button type="button" class="btn btn-outline btn-sm map-locate-button" onclick="locateMap('sos')">Use my current location</button>
+            <div class="map-picker-status" id="sos-map-status">Click the map or use your current location.</div>
+          </div>
+          <div style="margin-bottom:12px;">
+            <label class="form-label">Urgent Requirements *</label>
+            <textarea id="sos-details" class="form-control" placeholder="Describe urgent scenario..." required></textarea>
+          </div>
+          <button type="submit" class="btn btn-danger" style="width:100%;">Submit Urgent SOS</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. Volunteer Application Modal -->
+  <div class="modal-overlay" id="modal-vol-apply">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Apply to Join Volunteer Force</h3>
+        <button style="border:none; background:none; cursor:pointer;" onclick="closeVolunteerApplyModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <form id="vol-apply-form" onsubmit="submitVolApplyForm(event)">
+          <div class="grid-2" style="margin-bottom:10px;">
+            <div>
+              <label class="form-label">Full Name *</label>
+              <input type="text" id="vapp-name" class="form-control" required>
+            </div>
+            <div>
+              <label class="form-label">Phone *</label>
+              <input type="tel" id="vapp-phone" class="form-control" required>
+            </div>
+          </div>
+          <div class="grid-2" style="margin-bottom:10px;">
+            <div>
+              <label class="form-label">Username *</label>
+              <input type="text" id="vapp-user" class="form-control" required>
+            </div>
+            <div>
+              <label class="form-label">Password *</label>
+              <input type="password" id="vapp-pass" class="form-control" required>
+            </div>
+          </div>
+          <div class="grid-2" style="margin-bottom:10px;">
+            <div>
+              <label class="form-label">District *</label>
+                <input type="text" id="vapp-district" class="form-control" placeholder="Select on map" readonly required>
+            </div>
+            <div>
+              <label class="form-label">Govt ID Proof Number *</label>
+              <input type="text" id="vapp-idnum" class="form-control" placeholder="Aadhaar / Voter ID" required>
+            </div>
+          </div>
+          <div style="margin-bottom:12px;">
+            <label class="form-label">Pin your operating location *</label>
+            <div class="map-search-row">
+              <input type="text" id="vol-pincode" class="form-control" inputmode="numeric" maxlength="6" placeholder="Enter 6-digit pincode">
+              <button type="button" class="btn btn-primary" onclick="searchMapByPincode('vol')">Find nearby places</button>
+            </div>
+            <div class="map-search-results" id="vol-map-results"></div>
+            <div class="map-picker" id="vol-map"></div>
+            <button type="button" class="btn btn-outline btn-sm map-locate-button" onclick="locateMap('vol')">Use my current location</button>
+            <div class="map-picker-status" id="vol-map-status">Click the map or use your current location.</div>
+            <input type="hidden" id="vapp-state" value="">
+          </div>
+          <div style="margin-bottom:12px;">
+            <label class="form-label">Skills *</label>
+            <input type="text" id="vapp-skills" class="form-control" placeholder="Medical First Aid, Search & Rescue" required>
+          </div>
+          <button type="submit" class="btn btn-saffron" style="width:100%;">Submit Volunteer Application</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4. Sign In Modal -->
+  <div class="modal-overlay" id="modal-login">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Official & Staff Portal Sign In</h3>
+        <button style="border:none; background:none; cursor:pointer;" onclick="closeLoginModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <form id="login-form" onsubmit="submitLoginForm(event)">
+          <div style="margin-bottom:10px;">
+            <label class="form-label">Account Role</label>
+            <select id="log-role" class="form-select">
+              <option value="government">Government Official</option>
+              <option value="admin">Super Admin</option>
+              <option value="volunteer">Volunteer</option>
+            </select>
+          </div>
+          <div style="margin-bottom:10px;">
+            <label class="form-label">Username</label>
+            <input type="text" id="log-username" class="form-control" placeholder="Enter username" required>
+          </div>
+          <div style="margin-bottom:12px;">
+            <label class="form-label">Password</label>
+            <input type="password" id="log-password" class="form-control" placeholder="Enter password" required>
+          </div>
+          <button type="submit" class="btn btn-primary" style="width:100%;">Sign In</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- 5. Add Officer Modal -->
+  <div class="modal-overlay" id="modal-add-officer">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Add Official Officer</h3>
+        <button style="border:none; background:none; cursor:pointer;" onclick="closeAddOfficerModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <form id="officer-form" onsubmit="submitOfficerForm(event)">
+          <div style="margin-bottom:10px;">
+            <label class="form-label">Officer Name *</label>
+            <input type="text" id="off-name" class="form-control" placeholder="e.g. Commandant Rakesh Verma" required>
+          </div>
+          <div style="margin-bottom:10px;">
+            <label class="form-label">Department *</label>
+            <select id="off-dept" class="form-select">
+              <option value="NDRF (National Disaster Response Force)">NDRF</option>
+              <option value="Police Department">Police Department (112)</option>
+              <option value="Fire & Rescue Service">Fire Service (101)</option>
+              <option value="Ambulance & Medical Emergency">Ambulance Emergency (108)</option>
+            </select>
+          </div>
+          <div class="grid-2" style="margin-bottom:12px;">
+            <div>
+              <label class="form-label">Designation *</label>
+              <input type="text" id="off-rank" class="form-control" placeholder="Commander / SHO" required>
+            </div>
+            <div>
+              <label class="form-label">Phone *</label>
+              <input type="tel" id="off-phone" class="form-control" placeholder="+91 99887 76655" required>
+            </div>
+          </div>
+          <button type="submit" class="btn btn-success" style="width:100%;">+ Add Officer</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- 6. Volunteers Directory Modal -->
+  <div class="modal-overlay" id="modal-volunteers-dir">
+    <div class="modal-content" style="max-width:650px;">
+      <div class="modal-header">
+        <h3>Verified Active Volunteers Directory</h3>
+        <button style="border:none; background:none; cursor:pointer;" onclick="closeVolunteersDirectoryModal()">✕</button>
+      </div>
+      <div class="modal-body" style="max-height:70vh; overflow-y:auto;" id="volunteers-directory-list">
+        <!-- Dynamic list -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Message Alert Modal -->
+  <div class="modal-overlay" id="messageAlertModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="messageAlertTitle">Message</h3>
+        <button style="border:none; background:none; cursor:pointer;" onclick="closeMessageAlert()">✕</button>
+      </div>
+      <div class="modal-body" id="messageAlertBody">
+      </div>
+      <div class="modal-footer" style="text-align:right; padding:15px; border-top:1px solid var(--goi-border);">
+        <button type="button" class="btn btn-primary" onclick="closeMessageAlert()">OK</button>
+      </div>
+    </div>
+  </div>
+
   <script src="js/main.js"></script>
 </body>
 </html>

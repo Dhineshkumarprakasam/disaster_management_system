@@ -1,16 +1,32 @@
 const { getDb } = require('../config/mongodb');
+const memoryStore = require('./dataStore');
 const ADMINS = 'admins';
 
 async function findByUsername(username) {
-  return await getDb().collection(ADMINS).findOne({ username });
+  const db = getDb();
+  if (!db) {
+    return memoryStore.admins.find(a => a.username === username) || null;
+  }
+  return await db.collection(ADMINS).findOne({ username });
 }
-async function findById(_id) {
-  return await getDb().collection(ADMINS).findOne({ _id });
-}
+
 async function getAllAdmins() {
-  return await getDb().collection(ADMINS).find({}).project({ password: 0 }).toArray();
+  const db = getDb();
+  if (!db) {
+    return memoryStore.admins.map(({ passwordHash, password, ...rest }) => rest);
+  }
+  return await db.collection(ADMINS).find({}).project({ password: 0, passwordHash: 0 }).toArray();
 }
+
 async function insertAdmin(doc) {
-  return await getDb().collection(ADMINS).insertOne(doc);
+  const db = getDb();
+  if (!db) {
+    const _id = 'admin_' + Date.now();
+    const newAdmin = { _id, ...doc, createdAt: new Date() };
+    memoryStore.admins.push(newAdmin);
+    return { insertedId: _id };
+  }
+  return await db.collection(ADMINS).insertOne(doc);
 }
-module.exports = { findByUsername, findById, getAllAdmins, insertAdmin };
+
+module.exports = { findByUsername, getAllAdmins, insertAdmin };

@@ -1,17 +1,46 @@
 const { MongoClient } = require('mongodb');
-const uri = "mongodb://localhost:27017";
 const DBNAME = "disasterdb";
-const client = new MongoClient(uri, {});
-let db;
+
+let db = null;
+let useMemoryStore = false;
+
+async function tryConnect(targetUri) {
+  const client = new MongoClient(targetUri, { serverSelectionTimeoutMS: 2000 });
+  await client.connect();
+  const database = client.db(DBNAME);
+  try {
+    await database.collection('resources').createIndex({ location: "2dsphere" });
+  } catch (e) {}
+  return database;
+}
 
 async function connectMongo() {
-  await client.connect();
-  db = client.db(DBNAME);
-  await db.collection('resources').createIndex({ location: "2dsphere" });
-  return db;
+  const urisToTry = [];
+  if (process.env.MONGODB_URI) urisToTry.push(process.env.MONGODB_URI);
+  urisToTry.push("mongodb://mongo:27017", "mongodb://127.0.0.1:27017");
+
+  for (const uri of urisToTry) {
+    try {
+      db = await tryConnect(uri);
+      console.log(`✅ Connected to MongoDB successfully (${uri}).`);
+      return db;
+    } catch (err) {
+      // try next
+    }
+  }
+
+  console.warn('⚠️ MongoDB connection unavailable. Switching to In-Memory Engine for NDMS.');
+  useMemoryStore = true;
+  const memoryStore = require('../models/dataStore');
+  await memoryStore.ready;
+  return null;
 }
+
 function getDb() {
-  if (!db) throw new Error('MongoDB not yet connected!');
+  if (useMemoryStore || !db) {
+    return null;
+  }
   return db;
 }
+
 module.exports = { connectMongo, getDb };

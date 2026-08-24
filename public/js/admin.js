@@ -1,16 +1,96 @@
+// Message Alert Dialog Helper
+function showMessage(title, message) {
+  // Set content
+  const titleEl = document.getElementById('messageAlertTitle');
+  const bodyEl = document.getElementById('messageAlertBody');
+  if (titleEl) titleEl.textContent = title;
+  if (bodyEl) bodyEl.textContent = message;
+  
+  // Show modal
+  const modal = document.getElementById('messageAlertModal');
+  if (modal) {
+    try {
+      // Try Bootstrap modal first
+      const bsModal = new bootstrap.Modal(modal);
+      bsModal.show();
+    } catch (e) {
+      try {
+        // Fallback to jQuery method
+        $('#messageAlertModal').modal('show');
+      } catch (e2) {
+        console.error('Could not show modal:', e, e2);
+        alert(title + ': ' + message);
+      }
+    }
+  }
+}
+
 let isLoggedIn = false;
 let adminInfo = null;
+let resourceMap = null;
+let resourceMarker = null;
+let resourceCoordinates = null;
+
+function setResourcePoint(lat, lng) {
+  resourceCoordinates = { lat, lng };
+  if (!resourceMarker) {
+    resourceMarker = L.marker([lat, lng], { draggable: true }).addTo(resourceMap);
+    resourceMarker.on('dragend', function () {
+      const point = resourceMarker.getLatLng();
+      setResourcePoint(point.lat, point.lng);
+    });
+  } else {
+    resourceMarker.setLatLng([lat, lng]);
+  }
+  resourceMap.setView([lat, lng], Math.max(resourceMap.getZoom(), 14));
+  $('#resource-map-status').text(`Selected: ${lat.toFixed(6)}, ${lng.toFixed(6)}`);
+}
+
+function initResourceMap() {
+  if (resourceMap) {
+    resourceMap.invalidateSize();
+    return;
+  }
+  resourceMap = L.map('resource-map').setView([26.1445, 91.7362], 11);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; OpenStreetMap contributors'
+  }).addTo(resourceMap);
+  resourceMap.on('click', event => setResourcePoint(event.latlng.lat, event.latlng.lng));
+  setTimeout(() => resourceMap.invalidateSize(), 0);
+}
+
 $(function () {
+  const loginConfig = {
+    '/admin/login': { role: 'admin', url: '/api/auth/admin/login', title: 'Administrator sign in', copy: 'Platform administration, official account management, and system oversight.', button: 'Sign in as administrator', className: 'btn-primary' },
+    '/government/login': { role: 'government', url: '/api/auth/government/login', title: 'Government official sign in', copy: 'Verify incidents, approve volunteers, coordinate resources, and manage active response.', button: 'Sign in as government official', className: 'btn-success' },
+    '/volunteer/login': { role: 'volunteer', url: '/api/auth/volunteer/login', title: 'Volunteer sign in', copy: 'View assigned relief requests and report completed response work.', button: 'Sign in as volunteer', className: 'btn-warning' }
+  };
+  const config = loginConfig[window.location.pathname] || loginConfig['/admin/login'];
+  $('#login-copy').html(`<h3>${config.title}</h3><p class="text-muted">${config.copy}</p>`);
+  $('#login-submit').text(config.button).addClass(config.className);
+  $('#login-switcher').html(`<span class="text-muted">Other access:</span> <a href="/admin/login">Administrator</a> <a href="/government/login">Government official</a> <a href="/volunteer/login">Volunteer</a>`);
   checkSession();
 
   function checkSession() {
-    $.get('/api/admin/me')
+    $.get('/api/auth/me')
       .done(function (data) {
+      adminInfo = data.user;
         isLoggedIn = true;
         $('#login-section').addClass('d-none');
         $('#admin-dashboard').removeClass('d-none');
         $('#admin-logout').removeClass('d-none');
-        loadAll();
+        $('#role-banner').text(`Signed in as ${adminInfo.name} (${adminInfo.role})`);
+        if (adminInfo.role === 'admin') $('#government-form-card').removeClass('d-none');
+        if (adminInfo.role === 'admin' || adminInfo.role === 'government') {
+          $('#workflow-section').removeClass('d-none');
+          loadWorkflows();
+        }
+        if (adminInfo.role === 'volunteer') {
+          $('#btn-add-message, #btn-add-resource, #messages-table, #resources-table, #admins-table').addClass('d-none');
+          loadVolunteerRequests();
+        }
+        if (adminInfo.role !== 'volunteer') loadAll();
       })
       .fail(function () {
         $('#login-section').removeClass('d-none');
@@ -21,12 +101,13 @@ $(function () {
   // Login form
   $('#login-form').submit(function (e) {
     e.preventDefault();
+    const form = $(this);
     const username = $('#username').val();
     const password = $('#password').val();
     $.ajax({
       type: 'POST',
-      url: '/api/admin/login',
-      data: JSON.stringify({ username, password }),
+      url: config.url,
+      data: JSON.stringify({ username, password, role: config.role }),
       contentType: 'application/json'
     }).done(function (data) {
       isLoggedIn = true;
@@ -51,7 +132,7 @@ $(function () {
 
   // Messages CRUD
   function loadMessages() {
-    $.get('/api/messages', function (data) {
+    $.get('/api/admin/messages', function (data) {
       const msgs = data.messages || [];
       $('#messages-body').empty();
       msgs.forEach(function (m) {
@@ -80,7 +161,7 @@ $(function () {
 
   $('#messages-table').on('click', '.btn-edit-message', function () {
     const id = $(this).data('id');
-    $.get('/api/messages', function (data) {
+    $.get('/api/admin/messages', function (data) {
       const m = (data.messages || []).find(x => x._id === id);
       if (!m) return;
       $('#msg-id').val(m._id);
@@ -158,13 +239,30 @@ $(function () {
   $('#btn-add-resource').click(function () {
     $('#resource-form')[0].reset();
     $('#res-id').val('');
+    if (resourceMarker) resourceMap.removeLayer(resourceMarker);
+    resourceCoordinates = null;
+    resourceMarker = null;
     $('#resourceModalLabel').text('Add Resource');
     $('#resourceModal').modal('show');
+    setTimeout(initResourceMap, 50);
+  });
+
+  $('#resource-locate').click(function () {
+    initResourceMap();
+    if (!navigator.geolocation) return $('#resource-map-status').text('Location is unavailable. Click the map to choose a point.');
+    navigator.geolocation.getCurrentPosition(
+      position => setResourcePoint(position.coords.latitude, position.coords.longitude),
+      () => $('#resource-map-status').text('Location permission was unavailable. Click the map to choose a point.'),
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
+    );
   });
 
   $('#resources-table').on('click', '.btn-edit-resource', function () {
     const id = $(this).data('id');
-    $.get('/api/resources/nearby?lat=12.9716&lng=77.5946&radius=100000', function (data) {
+    resourceCoordinates = null;
+    if (resourceMarker) resourceMap.removeLayer(resourceMarker);
+    resourceMarker = null;
+    $.get('/api/admin/resources', function (data) {
       const r = (data.resources || []).find(x => x._id === id);
       if (!r) return;
       $('#res-id').val(r._id);
@@ -173,10 +271,14 @@ $(function () {
       $('#res-phones').val((r.phones || []).join(','));
       $('#res-address').val(r.address);
       if (r.location && r.location.coordinates) {
-        $('#res-location').val(`${r.location.coordinates[0]},${r.location.coordinates[1]}`);
+        resourceCoordinates = { lng: Number(r.location.coordinates[0]), lat: Number(r.location.coordinates[1]) };
       }
       $('#resourceModalLabel').text('Edit Resource');
       $('#resourceModal').modal('show');
+      setTimeout(function () {
+        initResourceMap();
+        if (resourceCoordinates) setResourcePoint(resourceCoordinates.lat, resourceCoordinates.lng);
+      }, 50);
     });
   });
 
@@ -190,17 +292,13 @@ $(function () {
   $('#resource-form').submit(function (e) {
     e.preventDefault();
     const id = $('#res-id').val();
-    let lnglat = $('#res-location').val().split(',').map(x=>parseFloat(x.trim()));
-    if (lnglat.length !== 2 || lnglat.some(isNaN)) {
-      alert('Location must be "lng,lat" format.');
-      return;
-    }
+    if (!resourceCoordinates) return showMessage('Input Required', 'Pin the exact resource location on the map first.');
     const obj = {
       name: $('#res-name').val(),
       type: $('#res-type').val(),
       phones: $('#res-phones').val().split(',').map(x=>x.trim()).filter(Boolean),
       address: $('#res-address').val(),
-      location: { type: "Point", coordinates: [lnglat[0], lnglat[1]] }
+      location: { type: "Point", coordinates: [resourceCoordinates.lng, resourceCoordinates.lat] }
     };
     if (id) {
       $.ajax({
@@ -241,4 +339,43 @@ $(function () {
       });
     });
   }
+
+  $('#government-form').submit(function (event) {
+    event.preventDefault();
+    const payload = {};
+    $(this).serializeArray().forEach(field => { payload[field.name] = field.value; });
+    $.ajax({ type: 'POST', url: '/api/admin/government', data: JSON.stringify(payload), contentType: 'application/json' })
+      .done(() => $('#government-result').removeClass('text-danger').addClass('text-success').text('Official account created.'))
+      .fail(xhr => $('#government-result').removeClass('text-success').addClass('text-danger').text(xhr.responseJSON?.error || 'Could not create account.'));
+  });
+
+  function loadWorkflows() {
+    $.get('/api/government/volunteers', data => {
+      $('#volunteers-list').empty();
+      (data.applications || []).forEach(item => $('#volunteers-list').append(`<div class="border p-2 mb-2"><b>${item.name}</b> <span class="badge bg-secondary">${item.status}</span><br>${item.skills || ''}${item.status === 'pending' ? ` <button class="btn btn-sm btn-success review-volunteer" data-id="${item._id}" data-status="approved">Approve</button> <button class="btn btn-sm btn-outline-danger review-volunteer" data-id="${item._id}" data-status="rejected">Reject</button>` : ''}</div>`));
+    });
+    $.get('/api/government/reports', data => {
+      $('#reports-list').empty();
+      (data.reports || []).forEach(item => $('#reports-list').append(`<div class="border p-2 mb-2"><b>${item.title}</b> <span class="badge bg-secondary">${item.status}</span><br>${item.description}${item.status === 'pending' ? ` <button class="btn btn-sm btn-success review-report" data-id="${item._id}" data-status="verified">Verify</button> <button class="btn btn-sm btn-outline-danger review-report" data-id="${item._id}" data-status="rejected">Reject</button>` : ''}</div>`));
+    });
+    $.get('/api/government/requests', data => {
+      $('#requests-list').empty();
+      (data.requests || []).forEach(item => $('#requests-list').append(`<div class="border p-2 mb-2"><b>${item.type}</b> <span class="badge bg-secondary">${item.status}</span><br>${item.details}${item.status === 'pending' ? ` <button class="btn btn-sm btn-success review-request" data-id="${item._id}" data-status="approved">Approve</button> <button class="btn btn-sm btn-outline-danger review-request" data-id="${item._id}" data-status="rejected">Reject</button>` : ''}</div>`));
+    });
+  }
+
+  function loadVolunteerRequests() {
+    $('#workflow-section').removeClass('d-none');
+    $('#role-banner').after('<h4 id="volunteer-queue-title">My Assigned Requests</h4><div id="volunteer-requests-list"></div>');
+    $.get('/api/volunteer/requests', data => {
+      $('#volunteer-requests-list').empty();
+      (data.requests || []).forEach(item => $('#volunteer-requests-list').append(`<div class="border p-2 mb-2"><b>${item.type}</b> <span class="badge bg-secondary">${item.status}</span><br>${item.details}${item.status === 'assigned' ? ` <button class="btn btn-sm btn-success fulfill-request" data-id="${item._id}">Mark fulfilled</button>` : ''}</div>`));
+    });
+  }
+
+  $('#workflow-section').on('click', '.review-volunteer', function () { review(`/api/government/volunteers/${$(this).data('id')}`, $(this).data('status')); });
+  $('#workflow-section').on('click', '.review-report', function () { review(`/api/government/reports/${$(this).data('id')}`, $(this).data('status')); });
+  $('#workflow-section').on('click', '.review-request', function () { review(`/api/government/requests/${$(this).data('id')}`, $(this).data('status')); });
+  $('#admin-dashboard').on('click', '.fulfill-request', function () { $.ajax({ type: 'PUT', url: `/api/volunteer/requests/${$(this).data('id')}/fulfill` }).done(loadVolunteerRequests); });
+  function review(url, status) { $.ajax({ type: 'PUT', url, data: JSON.stringify({ status }), contentType: 'application/json' }).done(loadWorkflows); }
 });

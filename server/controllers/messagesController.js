@@ -7,14 +7,18 @@ async function getActiveMessages(req, res) {
   res.json({ messages });
 }
 
+async function getAllMessages(req, res) {
+  res.json({ messages: await messageModel.getAllMessages() });
+}
+
 async function createMessage(req, res) {
   const { title, body, severity, area, active } = req.body;
-  const authorId = req.session.adminId;
+  const authorId = req.session.userId || req.session.adminId;
   if (!title || !body || !severity) return res.status(400).json({ error: "Required fields" });
   const doc = {
     title, body, severity, area,
     active: !!active,
-    authorId: new ObjectId(authorId)
+    authorId: ObjectId.isValid(authorId) ? new ObjectId(authorId) : authorId
   };
   const ret = await messageModel.insertMessage(doc);
   if (doc.active) {
@@ -42,4 +46,4 @@ async function deleteMessage(req, res) {
   res.json({ ok: true });
 }
 
-module.exports = { getActiveMessages, createMessage, updateMessage, deleteMessage };
+module.exports = { getActiveMessages, getAllMessages, createMessage, updateMessage, deleteMessage };

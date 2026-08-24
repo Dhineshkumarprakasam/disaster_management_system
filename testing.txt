@@ -1,0 +1,24 @@
+TESTING CREDENTIALS
+===================
+
+The following test accounts are available for development and testing purposes:
+
+1. Super Admin Account
+   - Username: admin
+   - Password: admin123
+   - Role: Super Administrator
+   - Access: Full platform administration
+
+2. Government Official Account
+   - Username: official
+   - Password: official123
+   - Role: Government Official
+   - Access: Incident verification, volunteer approval, resource coordination
+
+3. Volunteer Account
+   - Username: volunteer
+   - Password: volunteer123
+   - Role: Volunteer
+   - Access: View assigned relief requests, report completed response work
+
+Note: These credentials are for testing purposes only. They are seeded into the database when running in-memory data store mode.
