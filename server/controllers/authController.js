@@ -32,20 +32,22 @@ async function login(req, res) {
     }
 
     const accountRole = account.role || 'admin';
+    if (accountRole === 'government') {
+      return res.status(410).json({ error: 'Government staff accounts were retired.' });
+    }
     if (role && role !== accountRole) {
       return res.status(403).json({ error: `These credentials belong to a ${accountRole} account, not ${role}.` });
     }
 
-    // Block pending/rejected volunteers from logging in
     if (account.status && account.status === 'pending') {
       return res.status(403).json({
-        error: 'Your volunteer application is still under review. Government staff will approve your account shortly.',
+        error: 'Your volunteer application is awaiting approval.',
         status: 'pending'
       });
     }
     if (account.status && account.status === 'rejected') {
       return res.status(403).json({
-        error: 'Your volunteer application was not approved. Please contact the district authority.',
+        error: 'Your volunteer application was not approved.',
         status: 'rejected'
       });
     }
@@ -159,7 +161,7 @@ async function checkVolunteerStatus(req, res) {
 // Volunteer applies with full details
 async function applyVolunteer(req, res) {
   try {
-    const { username, password, name, phone, email, skills, availability, bloodGroup, idProofType, idProofNumber, district, state, location, lat, lng } = req.body;
+    const { username, password, name, phone, email, skills, availability, bloodGroup, district, state, location, lat, lng } = req.body;
     if (!username || !password || !name || !phone) {
       return res.status(400).json({ error: 'Username, password, full name, and phone are required.' });
     }
@@ -186,12 +188,10 @@ async function applyVolunteer(req, res) {
       phone,
       email: email || '',
       role: 'volunteer',
-      status: 'pending',
+      status: 'approved',
       skills: parsedSkills,
       availability: availability || 'Immediate',
       bloodGroup: bloodGroup || 'O+',
-      idProofType: idProofType || 'Aadhaar',
-      idProofNumber: idProofNumber || '',
       district: geo.district,
       state: geo.state,
       location: location || '',
@@ -211,11 +211,9 @@ async function applyVolunteer(req, res) {
       skills: parsedSkills,
       availability: availability || 'Immediate',
       bloodGroup: bloodGroup || 'O+',
-      idProofType: idProofType || 'Aadhaar',
-      idProofNumber: idProofNumber || '',
       district: geo.district,
       state: geo.state,
-      status: 'pending',
+      status: 'approved',
       createdAt: new Date()
     };
 
@@ -229,50 +227,11 @@ async function applyVolunteer(req, res) {
     res.status(201).json({
       ok: true,
       id: userId,
-      message: 'Volunteer application submitted! Government staff will review and approve your account. You can check your status using your username.'
+      message: 'Volunteer account created and ready to sign in.'
     });
   } catch (err) {
     console.error('Apply volunteer error:', err);
     res.status(500).json({ error: 'Failed to submit volunteer application.' });
-  }
-}
-
-// Admin creates Government Staff
-async function createGovernment(req, res) {
-  try {
-    if (req.session?.role !== 'admin') {
-      return res.status(403).json({ error: 'Access denied. Only Super Admin can create Government Staff accounts.' });
-    }
-
-    const { username, password, name, phone, email, department, district, state } = req.body;
-    if (!username || !password || !name) {
-      return res.status(400).json({ error: 'Username, password, and full name are required.' });
-    }
-
-    if (await userModel.findByUsername(username) || await findAdmin(username)) {
-      return res.status(409).json({ error: 'Username already exists.' });
-    }
-
-    const passwordHash = await bcrypt.hash(password, 10);
-    const result = await userModel.insertUser({
-      username,
-      passwordHash,
-      name,
-      phone: phone || '',
-      email: email || '',
-      department: department || 'Kamrup District Disaster Management Authority',
-      district: district || 'Kamrup',
-      state: state || 'Assam',
-      role: 'government',
-      status: 'approved',
-      createdBy: req.session.userId,
-      createdAt: new Date()
-    });
-
-    res.status(201).json({ ok: true, id: result.insertedId, message: `Government Staff account for "${name}" created successfully and assigned to ${district || 'Kamrup'} district.` });
-  } catch (err) {
-    console.error('Create govt error:', err);
-    res.status(500).json({ error: 'Failed to create Government Staff account.' });
   }
 }
 
@@ -316,27 +275,4 @@ async function listAdmins(req, res) {
   res.json({ admins: list });
 }
 
-// Admin: list all government staff accounts
-async function listGovernmentStaff(req, res) {
-  try {
-    if (req.session?.role !== 'admin') {
-      return res.status(403).json({ error: 'Access denied.' });
-    }
-
-    const db = getDb();
-    if (db) {
-      const staff = await db.collection('users').find({ role: 'government' }, { projection: { passwordHash: 0, password: 0 } }).sort({ createdAt: -1 }).toArray();
-      return res.json({ staff });
-    }
-
-    const staff = memoryStore.users
-      .filter(u => u.role === 'government')
-      .map(({ passwordHash, password, ...rest }) => rest);
-    return res.json({ staff });
-  } catch (err) {
-    console.error('listGovernmentStaff error:', err);
-    res.status(500).json({ error: 'Failed to list government staff.' });
-  }
-}
-
-module.exports = { login, logout, me, listAdmins, applyVolunteer, createGovernment, createAdmin, listGovernmentStaff, checkVolunteerStatus };
+module.exports = { login, logout, me, listAdmins, applyVolunteer, createAdmin, checkVolunteerStatus };

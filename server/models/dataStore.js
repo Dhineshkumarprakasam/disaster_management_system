@@ -4,8 +4,7 @@ const bcrypt = require('bcryptjs');
 class MemoryStore {
   constructor() {
     this.admins = [];
-    this.users = []; // includes govt staff, volunteers
-    this.officers = []; // official officers (police, fire, NDRF, etc.)
+    this.users = []; // verified volunteers
     this.incidents = []; // disaster reports
     this.messages = []; // published alerts
     this.resources = []; // shelters, hospitals, relief camps
@@ -17,7 +16,6 @@ class MemoryStore {
 
   async initSeedData() {
     const passwordHash = await bcrypt.hash('admin123', 10);
-    const govtHash = await bcrypt.hash('official123', 10);
     const volHash = await bcrypt.hash('volunteer123', 10);
 
     // ── Super Admin ──
@@ -34,22 +32,8 @@ class MemoryStore {
       }
     ];
 
-    // ── Government Staff & Approved Volunteers ──
+    // ── Approved Volunteers ──
     this.users = [
-      {
-        _id: 'user_govt_1',
-        username: 'official',
-        passwordHash: govtHash,
-        name: 'Shri Rajesh Baruah (IAS)',
-        phone: '+91 98640 11223',
-        email: 'rajesh.baruah@kamrup.assam.gov.in',
-        department: 'Kamrup District Disaster Management Authority',
-        role: 'government',
-        status: 'approved',
-        district: 'Kamrup',
-        state: 'Assam',
-        createdAt: new Date('2026-01-10')
-      },
       {
         _id: 'user_vol_1',
         username: 'volunteer',
@@ -129,54 +113,6 @@ class MemoryStore {
         location: 'Guwahati, Narengi',
         locationPoint: { type: 'Point', coordinates: [91.8100, 26.2000] },
         createdAt: new Date('2026-03-05')
-      }
-    ];
-
-    // ── Official Officers (Added by Admin) ──
-    this.officers = [
-      {
-        _id: 'off_1',
-        name: 'Inspector Debajit Das',
-        department: 'Police Department',
-        designation: 'Station House Officer, Jalukbari PS',
-        phone: '+91 99887 11223',
-        district: 'Kamrup',
-        badgeNo: 'POL-AS-8492',
-        addedBy: 'admin_1',
-        createdAt: new Date('2026-03-01')
-      },
-      {
-        _id: 'off_2',
-        name: 'Commandant Ranjit Gogoi',
-        department: 'NDRF (National Disaster Response Force)',
-        designation: '1st Battalion Commander, Patgaon',
-        phone: '+91 94350 11223',
-        district: 'Kamrup',
-        badgeNo: 'NDRF-BN1-091',
-        addedBy: 'admin_1',
-        createdAt: new Date('2026-03-02')
-      },
-      {
-        _id: 'off_3',
-        name: 'Dr. Barnali Pathak',
-        department: 'Ambulance & Medical Emergency (108)',
-        designation: 'Chief Medical Coordinator',
-        phone: '+91 97654 32109',
-        district: 'Kamrup',
-        badgeNo: 'MED-108-402',
-        addedBy: 'admin_1',
-        createdAt: new Date('2026-03-03')
-      },
-      {
-        _id: 'off_4',
-        name: 'Chief Officer Hemen Bora',
-        department: 'Fire & Rescue Service',
-        designation: 'Divisional Fire Officer, Guwahati',
-        phone: '+91 98220 54321',
-        district: 'Kamrup',
-        badgeNo: 'FIRE-DFO-119',
-        addedBy: 'admin_1',
-        createdAt: new Date('2026-03-04')
       }
     ];
 

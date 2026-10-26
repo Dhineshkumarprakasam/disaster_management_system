@@ -1,4 +1,5 @@
 const { getDb } = require('../config/mongodb');
+const { haversineDistance } = require('../../utils/geoHelpers');
 const COLLECTION = 'resources';
 const memoryStore = require('./dataStore');
 
@@ -41,7 +42,19 @@ async function deleteResource(id) {
   return await getDb().collection(COLLECTION).deleteOne({ _id: id });
 }
 async function getNearby(lat, lng, radius = 5000) {
-  if (memoryMode()) return memoryStore.resources;
+  if (memoryMode()) {
+    return memoryStore.resources
+      .map(resource => {
+        const coordinates = resource.location?.coordinates;
+        if (!Array.isArray(coordinates) || coordinates.length !== 2) return null;
+        const [resourceLng, resourceLat] = coordinates.map(Number);
+        const distanceKm = haversineDistance(lat, lng, resourceLat, resourceLng);
+        return Number.isFinite(distanceKm) ? { resource, distanceKm } : null;
+      })
+      .filter(item => item && item.distanceKm <= radius / 1000)
+      .sort((first, second) => first.distanceKm - second.distanceKm)
+      .map(item => item.resource);
+  }
   return await getDb().collection(COLLECTION).find({
     location: {
       $near: {

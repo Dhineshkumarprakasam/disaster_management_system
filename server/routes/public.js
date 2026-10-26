@@ -11,7 +11,6 @@ const { requireAuth } = require('../../utils/helpers');
 // Auth routes
 router.post('/auth/login', authController.login);
 router.post('/auth/admin/login', (req, res, next) => { req.body.role = 'admin'; next(); }, authController.login);
-router.post('/auth/government/login', (req, res, next) => { req.body.role = 'government'; next(); }, authController.login);
 router.post('/auth/volunteer/login', (req, res, next) => { req.body.role = 'volunteer'; next(); }, authController.login);
 router.post('/auth/volunteer/apply', authController.applyVolunteer);
 router.post('/auth/logout', requireAuth, authController.logout);

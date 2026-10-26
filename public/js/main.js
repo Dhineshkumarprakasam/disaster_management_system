@@ -5,6 +5,9 @@
 let currentUser = null;
 const mapPickers = {};
 const defaultMapCenter = [26.1445, 91.7362];
+let adminDashboardPollTimer = null;
+let adminDashboardLoading = false;
+let resourceItems = [];
 
 console.log('[main.js] Script loaded successfully - showMessage modal system is ready');
 
@@ -99,7 +102,12 @@ function setMapPoint(key, lat, lng) {
   }
   picker.map.setView([lat, lng], Math.max(picker.map.getZoom(), 14));
   $('#' + key + '-map-status').text(`Selected: ${lat.toFixed(6)}, ${lng.toFixed(6)}. Finding address...`);
-  reverseGeocode(key, lat, lng);
+  if (key === 'resource') {
+    $('#resource-map-status').text(`Selected: ${lat.toFixed(6)}, ${lng.toFixed(6)}`);
+  } else {
+    reverseGeocode(key, lat, lng);
+  }
+  if (key === 'dir') loadDirectoryVolunteers({ lat, lng });
 }
 
 async function reverseGeocode(key, lat, lng) {
@@ -184,10 +192,65 @@ async function searchMapByPincode(key) {
 $(document).ready(function () {
   initializeGeographyDropdowns();
   checkSession();
+  refreshServingInstance();
+  window.setInterval(refreshServingInstance, 10000);
   loadPublicIncidents();
   loadPublicResources();
   initSseStream();
+
+  $('#resource-form-reset, #resource-cancel').on('click', resetAdminResourceForm);
+  $('#resource-form').on('submit', async function (event) {
+    event.preventDefault();
+    const coordinates = mapPickers.resource?.coordinates;
+    if (!coordinates) {
+      showMessage('Location required', 'Click the map to pin the resource location.');
+      return;
+    }
+    const id = $('#resource-id').val();
+    const payload = {
+      name: $('#resource-name').val().trim(),
+      type: $('#resource-type').val(),
+      district: $('#resource-district').val().trim(),
+      state: $('#resource-state').val().trim(),
+      address: $('#resource-address').val().trim(),
+      phones: $('#resource-phones').val().split(',').map(phone => phone.trim()).filter(Boolean),
+      location: { type: 'Point', coordinates: [coordinates.lng, coordinates.lat] }
+    };
+    try {
+      await $.ajax({
+        url: id ? `/api/admin/resources/${encodeURIComponent(id)}` : '/api/admin/resources',
+        method: id ? 'PUT' : 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify(payload)
+      });
+      resetAdminResourceForm();
+      loadAdminResources();
+      showMessage('Saved', id ? 'Emergency resource updated.' : 'Emergency resource added.');
+    } catch (error) {
+      showMessage('Error', error.responseJSON?.error || 'Unable to save resource.');
+    }
+  });
 });
+
+async function refreshServingInstance() {
+  const indicator = document.getElementById('instance-indicator');
+  if (!indicator) return;
+
+  try {
+    const response = await fetch('/api/instance', { cache: 'no-store' });
+    if (!response.ok) throw new Error(`Instance endpoint returned ${response.status}`);
+    const data = await response.json();
+    if (typeof data.instanceId !== 'string' || !data.instanceId) {
+      throw new Error('Instance endpoint returned no instance ID');
+    }
+    indicator.textContent = `Serving instance: ${data.instanceId.slice(0, 12)}`;
+    indicator.title = `Gateway container: ${data.instanceId}`;
+  } catch (error) {
+    console.error('Could not determine the serving gateway instance:', error);
+    indicator.textContent = 'Serving instance: unavailable';
+    indicator.removeAttribute('title');
+  }
+}
 
 async function initializeGeographyDropdowns() {
   try {
@@ -243,11 +306,12 @@ async function checkSession() {
 }
 
 function renderGuestView() {
+  stopAdminDashboardUpdates();
   $('.view-section').hide();
   $('#portal-guest').show();
 
   $('#auth-nav-container').html(`
-    <button class="btn btn-primary" onclick="openLoginModal()">Official / Staff Sign In</button>
+    <button class="btn btn-primary" onclick="openLoginModal()">Admin / Volunteer Sign In</button>
   `);
 
   loadPublicIncidents();
@@ -267,6 +331,9 @@ function renderAuthenticatedView(user) {
   if (user.role === 'admin') {
     $('#portal-admin').show();
     $('#admin-welcome-text').text(`Super Admin Workspace - ${user.name}`);
+    startAdminDashboardUpdates();
+    loadAdminResources();
+    initMapPicker('resource');
     // Show/hide district row based on role selection
     $('#acc-role').off('change').on('change', function () {
       if ($(this).val() === 'admin') {
@@ -275,21 +342,6 @@ function renderAuthenticatedView(user) {
         $('#acc-district-row').show();
       }
     });
-    loadOfficialOfficers();
-  } else if (user.role === 'government') {
-    $('#portal-government').show();
-    $('#govt-welcome-text').text(`Government Official Command Center - ${user.name}`);
-
-    // District scope enforcement — show officer's district clearly
-    const officerDistrict = user.district || 'All Districts';
-    $('#govt-district-badge').html(
-      `Scoped to district: <strong style="background:rgba(255,255,255,0.25); padding:2px 8px; border-radius:4px;">${officerDistrict}</strong> &nbsp;|&nbsp; You can only view &amp; act on data within your assigned district.`
-    );
-    $('#govt-district-scope-badge').text(officerDistrict);
-
-    loadGovtPendingIncidents();
-    loadGovtVolunteerApps();
-    populateGovtDropdowns();
   } else if (user.role === 'volunteer') {
     $('#portal-volunteer').show();
     $('#vol-welcome-text').text(`Volunteer Operations Portal - ${user.name}`);
@@ -306,6 +358,120 @@ async function handleLogout() {
   currentUser = null;
   showMessage('Success', 'Signed out successfully.');
   renderGuestView();
+}
+
+function stopAdminDashboardUpdates() {
+  if (adminDashboardPollTimer) {
+    clearInterval(adminDashboardPollTimer);
+    adminDashboardPollTimer = null;
+  }
+  adminDashboardLoading = false;
+}
+
+function startAdminDashboardUpdates() {
+  if (adminDashboardPollTimer) return;
+  loadAdminDisasterDashboard();
+  adminDashboardPollTimer = setInterval(function () {
+    if (!document.hidden) loadAdminDisasterDashboard();
+  }, 5000);
+}
+
+function formatAdminDashboardTime(value) {
+  const timestamp = String(value || '').replace(' ', 'T');
+  const date = new Date(/[zZ]|[+-]\d\d:\d\d$/.test(timestamp) ? timestamp : `${timestamp}Z`);
+  return Number.isNaN(date.getTime()) ? String(value || '—') : date.toLocaleString();
+}
+
+function renderAdminDashboardBreakdown(selector, rows, label) {
+  const container = $(selector).empty();
+  if (!rows.length) {
+    container.text('No disaster data yet.');
+    return;
+  }
+
+  const maximum = Math.max(...rows.map(item => Number(item.count) || 0), 1);
+  rows.forEach(function (item) {
+    const line = $('<div style="margin-bottom:8px;">');
+    const labels = $('<div style="display:flex; justify-content:space-between;">')
+      .append($('<span>').text(label(item)))
+      .append($('<span>').text(item.count));
+    const track = $('<div style="height:6px; background:#e5e7eb; border-radius:4px; overflow:hidden;">');
+    track.append($('<div style="height:100%; background:#1f5c92;">')
+      .css('width', `${Math.max(2, (Number(item.count) || 0) / maximum * 100)}%`));
+    line.append(labels, track);
+    container.append(line);
+  });
+}
+
+function renderAdminDisasterDashboard(data) {
+  const metrics = data.metrics || {};
+  $('#admin-dashboard-total').text(metrics.total ?? 0);
+  $('#admin-dashboard-incidents').text(metrics.incidents ?? 0);
+  $('#admin-dashboard-sos').text(metrics.sos_requests ?? 0);
+  $('#admin-dashboard-verified').text(metrics.verified ?? 0);
+  $('#admin-dashboard-pending').text(metrics.pending ?? 0);
+  $('#admin-dashboard-rejected').text(metrics.rejected ?? 0);
+  $('#admin-dashboard-published').text(metrics.published ?? 0);
+
+  renderAdminDashboardBreakdown('#admin-dashboard-severity', data.severity || [],
+    item => item.severity || 'Unknown');
+  renderAdminDashboardBreakdown('#admin-dashboard-districts', data.districts || [],
+    item => [item.district, item.state].filter(Boolean).join(', ') || 'Unknown location');
+
+  const daily = data.daily || [];
+  const maximumDaily = Math.max(...daily.map(item => Number(item.count) || 0), 1);
+  const dailyContainer = $('#admin-dashboard-daily').empty();
+  daily.forEach(function (item) {
+    const count = Number(item.count) || 0;
+    const column = $('<div style="display:flex; flex-direction:column; align-items:center; justify-content:flex-end; height:100%; flex:1;">');
+    column.append($('<span style="font-size:0.75rem;">').text(count));
+    column.append($('<div style="width:100%; min-height:2px; background:#1f5c92; border-radius:4px 4px 0 0; margin-top:4px;">')
+      .css('height', `${Math.max(2, count / maximumDaily * 76)}px`));
+    column.append($('<span style="font-size:0.72rem; color:var(--text-muted); margin-top:4px;">')
+      .text(String(item.date || '').slice(5)));
+    dailyContainer.append(column);
+  });
+  if (!daily.length) dailyContainer.text('No disaster data for this period.');
+
+  const recentContainer = $('#admin-dashboard-recent').empty();
+  (data.recent || []).forEach(function (item) {
+    const row = $('<tr>');
+    [
+      formatAdminDashboardTime(item.event_time),
+      item.record_type === 'sos' ? 'SOS request' : 'Incident report',
+      String(item.event_type || '').replace(/-/g, ' '),
+      item.title,
+      item.category,
+      item.severity,
+      [item.district, item.state].filter(Boolean).join(', '),
+      item.volunteer_status || item.status
+    ].forEach(value => row.append($('<td>').text(value || '—')));
+    recentContainer.append(row);
+  });
+  if (!data.recent?.length) {
+    recentContainer.append($('<tr>').append(
+      $('<td colspan="8" style="text-align:center; padding:14px; color:var(--text-muted);">')
+        .text('No disaster activity has been recorded yet.')
+    ));
+  }
+  $('#admin-dashboard-status')
+    .css('color', 'var(--text-muted)')
+    .text(`Live · updated ${new Date().toLocaleTimeString()}`);
+}
+
+function loadAdminDisasterDashboard() {
+  if (adminDashboardLoading) return;
+  adminDashboardLoading = true;
+  $.get('/api/admin/disaster-dashboard')
+    .done(renderAdminDisasterDashboard)
+    .fail(function (xhr) {
+      $('#admin-dashboard-status')
+        .css('color', '#b91c1c')
+        .text(xhr.responseJSON?.error || 'Unable to load disaster analytics.');
+    })
+    .always(function () {
+      adminDashboardLoading = false;
+    });
 }
 
 
@@ -376,6 +542,139 @@ async function loadPublicResources() {
   }
 }
 
+function resourceCoordinates(resource) {
+  const coordinates = resource?.location?.coordinates;
+  if (!Array.isArray(coordinates) || coordinates.length !== 2) return null;
+  const [lng, lat] = coordinates.map(Number);
+  return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+}
+
+function renderAdminResources() {
+  const list = $('#admin-resources-list').empty();
+  if (!resourceItems.length) {
+    list.append($('<tr>').append($('<td colspan="6" class="text-center text-muted">').text('No emergency resources have been added.')));
+    return;
+  }
+
+  resourceItems.forEach(resource => {
+    const row = $('<tr>');
+    [resource.name, resource.type, [resource.district, resource.state].filter(Boolean).join(', '), resource.address,
+      Array.isArray(resource.phones) ? resource.phones.join(', ') : resource.phones]
+      .forEach(value => row.append($('<td>').text(value || '—')));
+    const actions = $('<td>');
+    actions.append($('<button type="button" class="btn btn-outline btn-sm me-1">').text('Edit')
+      .on('click', () => editAdminResource(resource._id)));
+    actions.append($('<button type="button" class="btn btn-danger btn-sm">').text('Remove')
+      .on('click', () => removeAdminResource(resource._id)));
+    row.append(actions);
+    list.append(row);
+  });
+}
+
+function loadAdminResources() {
+  $('#admin-resources-status').text('Loading emergency resources...');
+  $.get('/api/admin/resources')
+    .done(data => {
+      resourceItems = Array.isArray(data) ? data : data.resources || [];
+      renderAdminResources();
+      $('#admin-resources-status').text(`${resourceItems.length} resource${resourceItems.length === 1 ? '' : 's'}`);
+    })
+    .fail(xhr => $('#admin-resources-status').text(xhr.responseJSON?.error || 'Unable to load resources.'));
+}
+
+function resetAdminResourceForm() {
+  $('#resource-form')[0].reset();
+  $('#resource-id').val('');
+  $('#resource-submit').text('Save Resource');
+  $('#resource-cancel').prop('hidden', true);
+  const picker = mapPickers.resource;
+  if (picker?.marker) picker.map.removeLayer(picker.marker);
+  if (picker) {
+    picker.marker = null;
+    picker.coordinates = null;
+    picker.map.setView(defaultMapCenter, 11);
+  }
+  $('#resource-map-status').text('Click the map to set the resource location.');
+}
+
+function editAdminResource(id) {
+  const resource = resourceItems.find(item => String(item._id) === String(id));
+  if (!resource) return;
+  $('#resource-id').val(resource._id);
+  $('#resource-name').val(resource.name || '');
+  $('#resource-type').val(resource.type || 'other');
+  $('#resource-district').val(resource.district || '');
+  $('#resource-state').val(resource.state || '');
+  $('#resource-address').val(resource.address || '');
+  $('#resource-phones').val(Array.isArray(resource.phones) ? resource.phones.join(', ') : resource.phones || '');
+  $('#resource-submit').text('Update Resource');
+  $('#resource-cancel').prop('hidden', false);
+  const coordinates = resourceCoordinates(resource);
+  if (coordinates) setMapPoint('resource', coordinates.lat, coordinates.lng);
+  $('#resource-name').trigger('focus');
+}
+
+function removeAdminResource(id) {
+  if (!window.confirm('Remove this emergency resource?')) return;
+  $.ajax({ url: `/api/admin/resources/${encodeURIComponent(id)}`, method: 'DELETE' })
+    .done(loadAdminResources)
+    .fail(xhr => showMessage('Error', xhr.responseJSON?.error || 'Unable to remove resource.'));
+}
+
+function getTaskCoordinates(task) {
+  const point = task.locationPoint || (task.location?.type === 'Point' ? task.location : null);
+  if (point?.coordinates?.length === 2) {
+    const [lng, lat] = point.coordinates.map(Number);
+    if (Number.isFinite(lat) && Number.isFinite(lng)) return { lat, lng };
+  }
+  const lat = Number(task.lat);
+  const lng = Number(task.lng);
+  return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+}
+
+function taskDirectionsUrl(task) {
+  const coordinates = getTaskCoordinates(task);
+  const destination = coordinates
+    ? `${coordinates.lat},${coordinates.lng}`
+    : [task.area, task.address, task.location, task.district, task.state].filter(value => typeof value === 'string' && value.trim()).join(', ');
+  const query = coordinates ? 'destination' : 'query';
+  return `https://www.google.com/maps/${coordinates ? 'dir' : 'search'}/?api=1&${query}=${encodeURIComponent(destination)}`;
+}
+
+async function loadTaskResources(task, containerId) {
+  const container = $(`#${containerId}`);
+  const coordinates = getTaskCoordinates(task);
+  try {
+    let resources = [];
+    if (coordinates) {
+      const response = await $.get('/api/resources/nearby', { lat: coordinates.lat, lng: coordinates.lng, radius: 10000 });
+      resources = response.resources || [];
+    } else {
+      const response = await $.get('/api/admin/resources');
+      const allResources = response.resources || [];
+      const district = String(task.district || '').toLowerCase();
+      const districtResources = allResources.filter(resource => !district || String(resource.district || '').toLowerCase().includes(district));
+      resources = districtResources.length ? districtResources : allResources;
+    }
+    if (!resources.length) {
+      container.text('No nearby emergency centers are listed yet.');
+      return;
+    }
+    resources.slice(0, 4).forEach(resource => {
+      const coordinates = resourceCoordinates(resource);
+      const destination = coordinates
+        ? `${coordinates.lat},${coordinates.lng}`
+        : [resource.address, resource.district, resource.state].filter(Boolean).join(', ');
+      const link = $('<a target="_blank" rel="noopener noreferrer">')
+        .attr('href', `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}`)
+        .text(`${resource.name || 'Emergency center'}${resource.type ? ` · ${resource.type}` : ''}`);
+      container.append($('<div class="small">').append(link));
+    });
+  } catch (error) {
+    container.text('Nearby centers could not be loaded.');
+  }
+}
+
 
 // --- 2. MODAL DIALOGS ---
 
@@ -391,18 +690,30 @@ function closeVolunteerApplyModal() { $('#modal-vol-apply').removeClass('active'
 function openLoginModal() { $('#modal-login').addClass('active'); }
 function closeLoginModal() { $('#modal-login').removeClass('active'); }
 
-function openAddOfficerModal() { $('#modal-add-officer').addClass('active'); }
-function closeAddOfficerModal() { $('#modal-add-officer').removeClass('active'); }
-
 async function openVolunteersDirectoryModal() {
   $('#modal-volunteers-dir').addClass('active');
+  initMapPicker('dir');
+  $('#volunteers-directory-list').html('Select a location to search for volunteers.');
+}
+
+async function loadDirectoryVolunteers(coordinates) {
+  const container = $('#volunteers-directory-list');
+  if (!coordinates) {
+    container.html('Select a location to search for volunteers.');
+    return;
+  }
+  container.html('<div style="text-align:center; padding:20px; color:var(--text-muted);">Searching nearby volunteers...</div>');
   try {
-    const res = await $.ajax({ url: '/api/volunteers/nearby', method: 'GET' });
+    const res = await $.ajax({
+      url: '/api/volunteers/nearby',
+      method: 'GET',
+      data: { lat: coordinates.lat, lng: coordinates.lng, radiusKm: 3 }
+    });
     const volunteers = res.volunteers || [];
     const container = $('#volunteers-directory-list');
 
     if (volunteers.length === 0) {
-      container.html('<div style="text-align:center; padding:20px; color:var(--text-muted);">No verified active volunteers listed.</div>');
+      container.html('<div style="text-align:center; padding:20px; color:var(--text-muted);">No verified active volunteers found within 3 km.</div>');
       return;
     }
 
@@ -415,7 +726,7 @@ async function openVolunteersDirectoryModal() {
             <strong style="color:var(--goi-navy);">${v.name}</strong>
             <span class="badge badge-success">VERIFIED</span>
           </div>
-          <div style="font-size:0.8rem; color:var(--text-muted); margin-top:2px;">District: ${v.district || ''} | Blood: ${v.bloodGroup || 'O+'}</div>
+          <div style="font-size:0.8rem; color:var(--text-muted); margin-top:2px;">${v.distanceKm != null ? `${v.distanceKm.toFixed(2)} km away` : `District: ${v.district || ''}`} | Blood: ${v.bloodGroup || 'O+'}</div>
           <div style="font-size:0.8rem; color:var(--goi-navy); margin-top:2px;">⚡ Skills: ${skills}</div>
           <div style="margin-top:6px;"><a href="tel:${v.phone}" class="btn btn-success btn-sm">Direct Call ${v.phone}</a></div>
         </div>
@@ -428,15 +739,58 @@ async function openVolunteersDirectoryModal() {
   }
 }
 
+function locateDirectoryVolunteers() {
+  locateMap('dir');
+}
+
 function closeVolunteersDirectoryModal() { $('#modal-volunteers-dir').removeClass('active'); }
 
 
 // --- 3. CITIZEN FORM SUBMISSIONS (Auto-Dispatched) ---
 
+function beginFormSubmission(form, message) {
+  if (!form || form.dataset.submitting === 'true') return false;
+
+  const submitButton = form.querySelector('[type="submit"]');
+  if (!submitButton) return false;
+
+  form.dataset.submitting = 'true';
+  form.setAttribute('aria-busy', 'true');
+  submitButton.dataset.originalText = submitButton.textContent;
+  submitButton.disabled = true;
+  submitButton.textContent = 'Please wait...';
+
+  const overlay = document.getElementById('submission-loading');
+  document.getElementById('submission-loading-message').textContent = message;
+  overlay.classList.add('active');
+  overlay.setAttribute('aria-hidden', 'false');
+  return true;
+}
+
+function endFormSubmission(form) {
+  if (!form) return;
+
+  const submitButton = form.querySelector('[type="submit"]');
+  if (submitButton) {
+    submitButton.disabled = false;
+    submitButton.textContent = submitButton.dataset.originalText || submitButton.textContent;
+    delete submitButton.dataset.originalText;
+  }
+
+  delete form.dataset.submitting;
+  form.removeAttribute('aria-busy');
+  const overlay = document.getElementById('submission-loading');
+  overlay.classList.remove('active');
+  overlay.setAttribute('aria-hidden', 'true');
+}
+
 async function submitReportForm(e) {
   e.preventDefault();
   const coordinates = getMapCoordinates('rep');
   if (!coordinates) return showMessage('Input Required', 'Select the exact incident location on the map first.');
+  const form = document.getElementById('report-form');
+  if (!beginFormSubmission(form, 'Submitting your incident report for validation...')) return;
+
   const payload = {
     title: $('#rep-title').val(),
     category: $('#rep-cat').val(),
@@ -464,6 +818,8 @@ async function submitReportForm(e) {
     }
   } catch (err) {
     showMessage('Error', err.responseJSON?.error || 'Failed to submit report.');
+  } finally {
+    endFormSubmission(form);
   }
 }
 
@@ -471,6 +827,9 @@ async function submitSosForm(e) {
   e.preventDefault();
   const coordinates = getMapCoordinates('sos');
   if (!coordinates) return showMessage('Input Required', 'Select the exact SOS location on the map first.');
+  const form = document.getElementById('sos-form');
+  if (!beginFormSubmission(form, 'Sending your urgent SOS request...')) return;
+
   const payload = {
     type: $('#sos-type').val(),
     requesterName: $('#sos-name').val(),
@@ -496,6 +855,8 @@ async function submitSosForm(e) {
     }
   } catch (err) {
     showMessage('Error', err.responseJSON?.error || 'Failed to submit SOS request.');
+  } finally {
+    endFormSubmission(form);
   }
 }
 
@@ -503,6 +864,9 @@ async function submitVolApplyForm(e) {
   e.preventDefault();
   const coordinates = getMapCoordinates('vol');
   if (!coordinates) return showMessage('Input Required', 'Select your exact operating location on the map first.');
+  const form = document.getElementById('vol-apply-form');
+  if (!beginFormSubmission(form, 'Submitting your volunteer application...')) return;
+
   const payload = {
     name: $('#vapp-name').val(),
     phone: $('#vapp-phone').val(),
@@ -510,7 +874,6 @@ async function submitVolApplyForm(e) {
     password: $('#vapp-pass').val(),
     district: $('#vapp-district').val(),
     state: $('#vapp-state').val(),
-    idProofNumber: $('#vapp-idnum').val(),
     skills: $('#vapp-skills').val(),
     ...(coordinates || {})
   };
@@ -529,6 +892,8 @@ async function submitVolApplyForm(e) {
     }
   } catch (err) {
     showMessage('Error', err.responseJSON?.error || 'Volunteer registration failed.');
+  } finally {
+    endFormSubmission(form);
   }
 }
 
@@ -558,86 +923,15 @@ async function submitLoginForm(e) {
 
 // --- 4. SUPER ADMIN WORKSPACE ACTIONS ---
 
-async function loadOfficialOfficers() {
-  try {
-    const res = await $.ajax({ url: '/api/admin/officers', method: 'GET' });
-    const officers = res.officers || [];
-    const tbody = $('#admin-officers-tbody');
-
-    if (officers.length === 0) {
-      tbody.html('<tr><td colspan="5" style="text-align:center; color:var(--text-muted);">No official officers registered.</td></tr>');
-      return;
-    }
-
-    let html = '';
-    officers.forEach(o => {
-      html += `
-        <tr>
-          <td><strong>${o.name}</strong></td>
-          <td><span class="badge badge-info">${o.department}</span></td>
-          <td>${o.designation || 'Officer'}</td>
-          <td>${o.phone}</td>
-          <td><button class="btn btn-danger btn-sm" onclick="removeOfficer('${o._id}')">Remove</button></td>
-        </tr>
-      `;
-    });
-
-    tbody.html(html);
-  } catch (err) {
-    console.error('Failed to load official officers:', err);
-  }
-}
-
-async function submitOfficerForm(e) {
-  e.preventDefault();
-  const payload = {
-    name: $('#off-name').val(),
-    department: $('#off-dept').val(),
-    designation: $('#off-rank').val(),
-    phone: $('#off-phone').val()
-  };
-
-  try {
-    const res = await $.ajax({
-      url: '/api/admin/officers',
-      method: 'POST',
-      contentType: 'application/json',
-      data: JSON.stringify(payload)
-    });
-    if (res.ok) {
-      showMessage('Success', res.message);
-      closeAddOfficerModal();
-      loadOfficialOfficers();
-    }
-  } catch (err) {
-    showMessage('Error', err.responseJSON?.error || 'Failed to add officer.');
-  }
-}
-
-async function removeOfficer(id) {
-  if (!confirm('Remove this official officer?')) return;
-  try {
-    const res = await $.ajax({ url: `/api/admin/officers/${id}`, method: 'DELETE' });
-    if (res.ok) {
-      showMessage('Success', res.message);
-      loadOfficialOfficers();
-    }
-  } catch (err) {
-    showMessage('Error', err.responseJSON?.error || 'Failed to remove officer.');
-  }
-}
-
 async function handleCreateAccount(e) {
   e.preventDefault();
   const roleType = $('#acc-role').val();
-  const endpoint = roleType === 'admin' ? '/api/admin/create-admin' : '/api/admin/create-government';
+  const endpoint = '/api/admin/create-admin';
   const payload = {
     name: $('#acc-name').val(),
     username: $('#acc-username').val(),
     password: $('#acc-password').val(),
-    department: $('#acc-dept').val(),
-    district: roleType === 'admin' ? undefined : $('#acc-district').val(),
-    state: roleType === 'admin' ? undefined : $('#acc-state').val()
+    department: $('#acc-dept').val()
   };
 
   try {
@@ -727,7 +1021,7 @@ async function loadGovtVolunteerApps() {
       html += `
         <div style="padding:10px; border-bottom:1px solid var(--goi-border);">
           <strong style="color:var(--goi-navy);">${a.name}</strong> (${a.phone})
-          <div style="font-size:0.8rem; color:var(--text-muted);">District: ${a.district || ''} | ID: ${a.idProofNumber || ''}</div>
+          <div style="font-size:0.8rem; color:var(--text-muted);">District: ${a.district || ''}</div>
           <div style="display:flex; gap:6px; margin-top:8px;">
             <button class="btn btn-success btn-sm" onclick="reviewVolApp('${a._id}', 'approved')">✓ Approve</button>
             <button class="btn btn-danger btn-sm" onclick="reviewVolApp('${a._id}', 'rejected')">✕ Reject</button>
@@ -849,37 +1143,45 @@ async function loadVolunteerTasks() {
       return;
     }
 
-    let html = '';
-    incidents.forEach(i => {
-      html += `
-        <div style="padding:12px; border-bottom:1px solid var(--goi-border);">
-          <strong style="color:var(--goi-navy);">AUTO-ASSIGNED INCIDENT: ${i.title}</strong>
-          <p style="font-size:0.85rem; color:var(--text-main); margin-top:2px;">${i.description}</p>
-          <div style="display:flex; gap:6px; margin-top:8px;">
-            <button class="btn btn-outline btn-sm" onclick="updateTask('${i._id}', 'En Route', 'incident')">En Route</button>
-            <button class="btn btn-success btn-sm" onclick="updateTask('${i._id}', 'Fulfilled', 'incident')">✓ Completed</button>
-          </div>
-        </div>
-      `;
-    });
-
-    sos.forEach(s => {
-      html += `
-        <div style="padding:12px; border-bottom:1px solid var(--goi-border);">
-          <strong style="color:var(--goi-navy);">AUTO-ASSIGNED SOS: ${s.type.toUpperCase()}</strong> (${s.contact})
-          <p style="font-size:0.85rem; color:var(--text-main); margin-top:2px;">${s.details}</p>
-          <div style="margin-top:8px; display:flex; gap:6px;">
-            <button class="btn btn-outline btn-sm" onclick="updateTask('${s._id}', 'en route', 'sos')">En Route</button>
-            <button class="btn btn-success btn-sm" onclick="updateTask('${s._id}', 'fulfilled', 'sos')">✓ Mark Fulfilled</button>
-          </div>
-        </div>
-      `;
-    });
-
-    container.html(html);
+    container.empty();
+    incidents.forEach((incident, index) => appendVolunteerTask(container, incident, 'incident', index));
+    sos.forEach((request, index) => appendVolunteerTask(container, request, 'sos', index));
   } catch (err) {
     console.error('Failed to load volunteer tasks:', err);
   }
+}
+
+function appendVolunteerTask(container, task, type, index) {
+  const isSos = type === 'sos';
+  const taskTitle = isSos ? `SOS: ${String(task.type || 'request').toUpperCase()}` : `Incident: ${task.title || 'Emergency response'}`;
+  const location = isSos
+    ? task.location || task.address || [task.district, task.state].filter(Boolean).join(', ')
+    : task.area || task.address || [task.district, task.state].filter(Boolean).join(', ');
+  const card = $('<article class="volunteer-task-card" style="padding:12px; border-bottom:1px solid var(--goi-border);">');
+  card.append($('<strong>').text(taskTitle));
+  card.append($('<span class="badge badge-info ms-2">')
+    .text(isSos ? task.status || 'assigned' : task.volunteerStatus || 'assigned'));
+  card.append($('<p style="font-size:0.85rem; color:var(--text-main); margin:4px 0;">')
+    .text(isSos ? task.details || '' : task.description || ''));
+  if (location) card.append($('<div class="small text-muted mb-2">').text(`Location: ${location}`));
+  if (isSos && task.contact) card.append($('<div class="small text-muted mb-2">').text(`Contact: ${task.contact}`));
+
+  const actions = $('<div class="d-flex flex-wrap gap-2 mt-2">');
+  actions.append($('<a class="btn btn-primary btn-sm" target="_blank" rel="noopener noreferrer">')
+    .attr('href', taskDirectionsUrl(task)).text('Navigate to location'));
+  const enRoute = $('<button type="button" class="btn btn-outline btn-sm">').text('En Route')
+    .on('click', () => updateTask(task._id, isSos ? 'en route' : 'En Route', type));
+  const complete = $('<button type="button" class="btn btn-success btn-sm">').text(isSos ? 'Mark Fulfilled' : 'Completed')
+    .on('click', () => updateTask(task._id, isSos ? 'fulfilled' : 'Fulfilled', type));
+  actions.append(enRoute, complete);
+  card.append(actions);
+
+  const nearby = $('<div class="mt-2">').append($('<strong class="small">').text('Nearby emergency centers and shelters'));
+  const nearbyList = $('<div class="small text-muted" aria-live="polite">').text('Finding nearby centers...');
+  nearby.append(nearbyList);
+  card.append(nearby);
+  container.append(card);
+  loadTaskResources(task, nearbyList);
 }
 
 async function updateTask(id, status, type) {
@@ -908,9 +1210,12 @@ function initSseStream() {
     const source = new EventSource('/events');
     source.onmessage = function (e) {
       const data = JSON.parse(e.data);
-      if (data && data.title) {
+      const isTargeted = data?.type === 'volunteer_notification';
+      const isForCurrentVolunteer = !isTargeted || (currentUser?.role === 'volunteer' && data.targetVolunteerIds?.includes(String(currentUser.id)));
+      if (data && data.title && isForCurrentVolunteer) {
         $('#alert-ticker').text(`${data.title}: ${data.body}`);
         loadPublicIncidents();
+        if (isTargeted && currentUser?.role === 'volunteer') loadVolunteerTasks();
       }
     };
   } catch (e) {}

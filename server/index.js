@@ -1,43 +1,93 @@
 const express = require('express');
-const cookieParser = require('cookie-parser');
+const http = require('http');
+const https = require('https');
+const os = require('os');
 const path = require('path');
-const { connectMongo } = require('./config/mongodb');
-const { connectRedis } = require('./config/redis');
-const publicRoutes = require('./routes/public');
-const adminRoutes = require('./routes/admin');
-const workflowRoutes = require('./routes/workflow');
-const sseService = require('./services/sseService');
 
 const app = express();
+const services = {
+  auth: process.env.AUTH_SERVICE_URL || 'http://localhost:3101',
+  incidents: process.env.INCIDENT_SERVICE_URL || 'http://localhost:3102',
+  resources: process.env.RESOURCE_SERVICE_URL || 'http://localhost:3103',
+  notifications: process.env.NOTIFICATION_SERVICE_URL || 'http://localhost:3104',
+  analytics: process.env.ANALYTICS_SERVICE_URL || 'http://localhost:3105'
+};
 
-app.use(express.json());
-app.use(cookieParser());
+app.get('/admin.html', (req, res) => res.redirect(302, '/'));
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
-app.use('/api', publicRoutes);
-app.use('/api/admin', adminRoutes);
-app.use('/api', workflowRoutes);
-
-app.get('/events', (req, res) => {
-  sseService.handleSSE(req, res);
+app.get('/health', (req, res) => res.json({ status: 'ok', service: 'api-gateway' }));
+app.get('/api/instance', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({ instanceId: process.env.INSTANCE_ID || os.hostname() });
 });
 
-// Single Page Application route handler
-app.get('*', (req, res) => {
-  if (req.path.startsWith('/api') || req.path.startsWith('/events')) {
-    return res.status(404).json({ error: 'Endpoint not found' });
+function serviceForRequest(req) {
+  const { pathname } = new URL(req.originalUrl, 'http://gateway.local');
+
+  if (pathname === '/events' || pathname === '/api/messages' || pathname.startsWith('/api/admin/messages')) {
+    return services.notifications;
   }
+
+  if (
+    pathname.startsWith('/api/auth/') ||
+    ['/api/login', '/api/logout', '/api/me', '/api/admin/login', '/api/admin/logout', '/api/admin/me',
+      '/api/admin/admins', '/api/admin/create-admin'].includes(pathname)
+  ) {
+    return services.auth;
+  }
+
+  if (pathname === '/api/admin/disaster-dashboard') {
+    return services.analytics;
+  }
+
+  if (
+    pathname.startsWith('/api/resources') ||
+    pathname.startsWith('/api/geo/') ||
+    pathname.startsWith('/api/admin/resources')
+  ) {
+    return services.resources;
+  }
+
+  return services.incidents;
+}
+
+function proxyRequest(req, res) {
+  const target = new URL(serviceForRequest(req));
+  const isEventStream = new URL(req.originalUrl, 'http://gateway.local').pathname === '/events';
+  const transport = target.protocol === 'https:' ? https : http;
+  const headers = { ...req.headers, host: target.host };
+  const proxy = transport.request({
+    protocol: target.protocol,
+    hostname: target.hostname,
+    port: target.port || undefined,
+    method: req.method,
+    path: req.originalUrl,
+    headers
+  }, upstream => {
+    res.writeHead(upstream.statusCode || 502, upstream.headers);
+    if (isEventStream) res.flushHeaders();
+    upstream.pipe(res);
+  });
+
+  proxy.on('error', error => {
+    console.error(`Gateway proxy failed for ${req.method} ${req.url}`, error);
+    if (res.headersSent) {
+      res.destroy(error);
+      return;
+    }
+    res.status(502).json({ error: 'Upstream service is unavailable' });
+  });
+
+  req.pipe(proxy);
+}
+
+app.use(['/api', '/events'], proxyRequest);
+app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
 });
 
 const PORT = process.env.PORT || 3000;
-(async () => {
-  await connectMongo();
-  await connectRedis();
-  app.listen(PORT, () => {
-    console.log(`===========================================================`);
-    console.log(`🇮🇳 National Disaster Management System (NDMS) - India`);
-    console.log(`🌐 Application running on: http://localhost:${PORT}`);
-    console.log(`===========================================================`);
-  });
-})();
+app.listen(PORT, () => {
+  console.log(`NDMS API gateway listening on port ${PORT}`);
+});

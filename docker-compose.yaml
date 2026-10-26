@@ -1,47 +1,196 @@
+x-node-service: &node-service
+  build: .
+  image: ndms-node-service:local
+  init: true
+  restart: unless-stopped
+  environment:
+    MONGODB_URI: mongodb://mongo:27017
+    REDIS_URL: redis://redis:6379
+    ML_SERVICE_URL: http://ml-verifier:8000
+    CLICKHOUSE_URL: http://clickhouse:8123
+    CLICKHOUSE_DATABASE: ndms
+    CLICKHOUSE_USER: ${CLICKHOUSE_USER:-ndms_app}
+    CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?Set CLICKHOUSE_PASSWORD in .env}
+
+x-node-healthcheck: &node-healthcheck
+  test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3000/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+  interval: 10s
+  timeout: 10s
+  retries: 5
+  start_period: 120s
+
 services:
-  app:
-    build: .
-    container_name: node_app
-    ports:
-      - "3000:3000"
+  load-balancer:
+    build: ./load-balancer
     environment:
-      - MONGODB_URI=mongodb://mongo:27017
-      - REDIS_URL=redis://redis:6379
+      BACKENDS: http://api-gateway:3000
+      PORT: "8080"
+    ports:
+      - "8080:8080"
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  api-gateway:
+    <<: *node-service
+    command: ["node", "server/index.js"]
+    environment:
+      AUTH_SERVICE_URL: http://auth-service:3000
+      INCIDENT_SERVICE_URL: http://incident-service:3000
+      RESOURCE_SERVICE_URL: http://resource-service:3000
+      NOTIFICATION_SERVICE_URL: http://notification-service:3000
+      ANALYTICS_SERVICE_URL: http://analytics-service:3000
+    depends_on:
+      auth-service:
+        condition: service_healthy
+      incident-service:
+        condition: service_healthy
+      resource-service:
+        condition: service_healthy
+      notification-service:
+        condition: service_healthy
+      analytics-service:
+        condition: service_healthy
+    healthcheck: *node-healthcheck
+
+  auth-service:
+    <<: *node-service
+    command: ["node", "server/domainService.js", "auth"]
+    environment:
+      MONGODB_URI: mongodb://mongo:27017
+      REDIS_URL: redis://redis:6379
     depends_on:
       mongo:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck: *node-healthcheck
+
+  incident-service:
+    <<: *node-service
+    command: ["node", "server/domainService.js", "incidents"]
+    environment:
+      MONGODB_URI: mongodb://mongo:27017
+      REDIS_URL: redis://redis:6379
+      ML_SERVICE_URL: http://ml-verifier:8000
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_DATABASE: ndms
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-ndms_app}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?Set CLICKHOUSE_PASSWORD in .env}
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      ml-verifier:
+        condition: service_healthy
+    healthcheck: *node-healthcheck
+
+  resource-service:
+    <<: *node-service
+    command: ["node", "server/domainService.js", "resources"]
+    environment:
+      MONGODB_URI: mongodb://mongo:27017
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck: *node-healthcheck
+
+  notification-service:
+    <<: *node-service
+    command: ["node", "server/domainService.js", "notifications"]
+    environment:
+      MONGODB_URI: mongodb://mongo:27017
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck: *node-healthcheck
+
+  analytics-service:
+    <<: *node-service
+    command: ["node", "server/domainService.js", "analytics"]
+    environment:
+      REDIS_URL: redis://redis:6379
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_DATABASE: ndms
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-ndms_app}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?Set CLICKHOUSE_PASSWORD in .env}
+    depends_on:
+      redis:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    healthcheck: *node-healthcheck
+
+  ml-verifier:
+    build: ./ml-verifier
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
     restart: unless-stopped
 
   mongo:
     image: mongo:7
-    container_name: mongo_db
-    ports:
-      - "27017:27017"
     volumes:
       - mongo_data:/data/db
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand({ ping: 1 }).ok"]
       interval: 10s
-      timeout: 5s
-      retries: 5
+      timeout: 15s
+      retries: 12
+      start_period: 60s
     restart: unless-stopped
 
   redis:
     image: redis:7-alpine
-    container_name: redis_cache
-    ports:
-      - "6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
-      timeout: 5s
-      retries: 5
+      timeout: 10s
+      retries: 8
+      start_period: 20s
+    restart: unless-stopped
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:25.8-alpine
+    environment:
+      CLICKHOUSE_DB: ndms
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-ndms_app}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?Set CLICKHOUSE_PASSWORD in .env}
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - clickhouse-client --user="$${CLICKHOUSE_USER}" --password="$${CLICKHOUSE_PASSWORD}" --query "SELECT 1"
+      interval: 10s
+      timeout: 15s
+      retries: 12
+      start_period: 60s
     restart: unless-stopped
 
 volumes:
   mongo_data:
   redis_data:
+  clickhouse_data:

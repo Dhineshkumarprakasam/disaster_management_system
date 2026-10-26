@@ -1,6 +1,8 @@
 const { getDb } = require('../config/mongodb');
 const memoryStore = require('../models/dataStore');
 const { publishMessage } = require('../services/redisService');
+const { recordDisasterEvent } = require('../services/clickHouseService');
+const { predictValidity } = require('../services/mlService');
 const userModel = require('../models/userModel');
 const {
   matchDistrict,
@@ -178,6 +180,28 @@ async function autoMatchAndAssignVolunteer(targetType, targetDoc) {
   }
 }
 
+async function notifyNearbyVolunteers(targetDoc, notification) {
+  const db = getDb();
+  const volunteers = db
+    ? await db.collection('users').find({ role: 'volunteer', status: 'approved' }).toArray()
+    : memoryStore.users.filter(user => user.role === 'volunteer' && user.status === 'approved');
+  const targetIds = volunteers
+    .filter(volunteer => matchLocation(volunteer, targetDoc))
+    .filter(volunteer => isWithinVolunteerRadius(targetDoc, volunteer).eligible)
+    .map(volunteer => (volunteer._id || volunteer.id).toString());
+
+  if (targetIds.length) {
+    await publishMessage({
+      ...notification,
+      type: 'volunteer_notification',
+      targetVolunteerIds: targetIds,
+      latitude: getCoordinates(targetDoc)?.lat || null,
+      longitude: getCoordinates(targetDoc)?.lng || null,
+      createdAt: new Date()
+    });
+  }
+}
+
 async function autoTriggerDepartmentDispatches(reportDoc) {
   try {
     const category = (reportDoc.category || '').toLowerCase();
@@ -234,98 +258,7 @@ async function autoTriggerDepartmentDispatches(reportDoc) {
 
 
 // -------------------------------------------------------------
-// 1. ADMIN - OFFICIAL OFFICERS MANAGEMENT (Add & Remove Officers)
-// -------------------------------------------------------------
-
-async function listOfficialOfficers(req, res) {
-  try {
-    const sessionDistrict = (req.session?.role === 'government') ? req.session.district : null;
-    const col = getCollection('officialOfficers');
-
-    if (col) {
-      const query = sessionDistrict ? buildGeoScopeFilter(sessionDistrict, req.session?.state) : {};
-      const officers = await col.find(query).sort({ createdAt: -1 }).toArray();
-      return res.json({ officers });
-    }
-
-    let officers = memoryStore.officers;
-    if (sessionDistrict) {
-      officers = filterByGeoScope(officers, sessionDistrict, req.session?.state);
-    }
-    return res.json({ officers });
-  } catch (err) {
-    console.error('listOfficialOfficers error:', err);
-    res.status(500).json({ error: 'Failed to fetch official officers' });
-  }
-}
-
-async function addOfficialOfficer(req, res) {
-  try {
-    if (req.session?.role !== 'admin') {
-      return res.status(403).json({ error: 'Access denied. Only Super Admin can add official officers.' });
-    }
-
-    const { name, department, designation, phone, district, badgeNo } = req.body;
-    if (!name || !department || !phone) {
-      return res.status(400).json({ error: 'Name, department, and phone are required.' });
-    }
-
-    const officerDoc = {
-      _id: 'off_' + Date.now(),
-      name,
-      department,
-      designation: designation || 'Officer in Charge',
-      phone,
-      district: district || 'Kamrup Metropolitan (Guwahati)',
-      badgeNo: badgeNo || `GOI-OFF-${Math.floor(1000 + Math.random() * 9000)}`,
-      addedBy: req.session.userId,
-      createdAt: new Date()
-    };
-
-    const col = getCollection('officialOfficers');
-    if (col) {
-      const resDb = await col.insertOne(officerDoc);
-      officerDoc._id = resDb.insertedId;
-    } else {
-      memoryStore.officers.unshift(officerDoc);
-    }
-
-    res.status(201).json({ ok: true, officer: officerDoc, message: `Official officer "${name}" added successfully.` });
-  } catch (err) {
-    console.error('addOfficialOfficer error:', err);
-    res.status(500).json({ error: 'Failed to add official officer' });
-  }
-}
-
-async function removeOfficialOfficer(req, res) {
-  try {
-    if (req.session?.role !== 'admin') {
-      return res.status(403).json({ error: 'Access denied. Only Super Admin can remove official officers.' });
-    }
-
-    const officerId = req.params.id;
-    const col = getCollection('officialOfficers');
-    if (col) {
-      const { ObjectId } = require('mongodb');
-      const queryId = ObjectId.isValid(officerId) ? new ObjectId(officerId) : officerId;
-      await col.deleteOne({ _id: queryId });
-    } else {
-      const idx = memoryStore.officers.findIndex(o => o._id.toString() === officerId.toString());
-      if (idx !== -1) {
-        memoryStore.officers.splice(idx, 1);
-      }
-    }
-
-    res.json({ ok: true, message: 'Official officer removed successfully.' });
-  } catch (err) {
-    console.error('removeOfficialOfficer error:', err);
-    res.status(500).json({ error: 'Failed to remove official officer' });
-  }
-}
-
-
-// -------------------------------------------------------------
-// 2. CITIZEN INCIDENT REPORTING & GOVT STAFF VALIDATION/PUBLISHING
+// 1. CITIZEN INCIDENT REPORTING & AUTOMATED ML VALIDATION/PUBLISHING
 // -------------------------------------------------------------
 
 async function applyReport(req, res) {
@@ -374,14 +307,74 @@ async function applyReport(req, res) {
       memoryStore.incidents.unshift(reportDoc);
     }
 
+    const valid = await predictValidity(description);
+    reportDoc.status = valid ? 'verified' : 'rejected';
+    reportDoc.published = valid;
+    reportDoc.classifierValid = valid;
+    reportDoc.verifiedBy = valid ? 'ml-classifier' : null;
+    reportDoc.verifiedAt = valid ? new Date() : null;
+    reportDoc.updatedAt = new Date();
+
+    if (col) {
+      const { ObjectId } = require('mongodb');
+      const queryId = ObjectId.isValid(reportDoc._id) ? new ObjectId(reportDoc._id) : reportDoc._id;
+      const { _id, ...reportUpdates } = reportDoc;
+      await col.updateOne({ _id: queryId }, { $set: reportUpdates });
+    }
+
+    if (valid) {
+      await autoTriggerDepartmentDispatches(reportDoc);
+      const autoMatch = await autoMatchAndAssignVolunteer('incident', reportDoc);
+      if (autoMatch) {
+        reportDoc.assignedVolunteerId = autoMatch.volunteerId;
+        reportDoc.assignedVolunteerName = autoMatch.volunteerName;
+        reportDoc.assignedVolunteerPhone = autoMatch.volunteerPhone;
+        reportDoc.assignedVolunteerSkills = autoMatch.volunteerSkills;
+        reportDoc.autoAssigned = true;
+      }
+      const messageDoc = {
+        _id: 'msg_' + Date.now(),
+        title: reportDoc.title,
+        body: reportDoc.description,
+        severity: reportDoc.severity,
+        area: reportDoc.area,
+        district: reportDoc.district,
+        active: true,
+        sourceReportId: reportDoc._id,
+        authorId: reportDoc.reporterId,
+        createdAt: new Date()
+      };
+      const msgCol = getCollection('messages');
+      if (msgCol) await msgCol.insertOne(messageDoc);
+      else memoryStore.messages.unshift(messageDoc);
+      await publishMessage(messageDoc);
+      await notifyNearbyVolunteers(reportDoc, {
+        title: reportDoc.title,
+        body: reportDoc.description,
+        sourceReportId: reportDoc._id,
+        autoAssignedVolunteerId: autoMatch?.volunteerId || null
+      });
+    }
+
+    await recordDisasterEvent(reportDoc, 'incident', 'submitted');
+
     res.status(201).json({
       ok: true,
       id: reportDoc._id,
-      message: 'Incident reported! Submitted for government verification. Volunteers will be auto-assigned after approval.'
+      status: reportDoc.status,
+      published: reportDoc.published,
+      valid,
+      message: valid
+        ? 'Message was classified as valid and published to nearby volunteers.'
+        : 'Message was classified as invalid and was not published.'
     });
   } catch (err) {
     console.error('applyReport error:', err);
-    res.status(500).json({ error: 'Failed to submit incident report' });
+    res.status(err.code === 'CLICKHOUSE_WRITE_FAILED' ? 503 : 500).json({
+      error: err.code === 'CLICKHOUSE_WRITE_FAILED'
+        ? 'Incident was received but its analytics event could not be stored. Please contact support before retrying.'
+        : 'Failed to submit incident report'
+    });
   }
 }
 
@@ -527,6 +520,13 @@ async function reviewReport(req, res) {
       await publishMessage(messageDoc);
     }
 
+    report.status = status;
+    report.published = status === 'verified';
+    report.verifiedBy = req.session.userId;
+    report.verifiedAt = new Date();
+    report.updatedAt = new Date();
+    await recordDisasterEvent(report, 'incident', 'reviewed');
+
     res.json({
       ok: true,
       message: status === 'verified'
@@ -535,7 +535,11 @@ async function reviewReport(req, res) {
     });
   } catch (err) {
     console.error('reviewReport error:', err);
-    res.status(500).json({ error: 'Failed to review report' });
+    res.status(err.code === 'CLICKHOUSE_WRITE_FAILED' ? 503 : 500).json({
+      error: err.code === 'CLICKHOUSE_WRITE_FAILED'
+        ? 'The incident status changed, but its analytics event could not be stored.'
+        : 'Failed to review report'
+    });
   }
 }
 
@@ -599,6 +603,16 @@ async function dispatchDepartment(req, res) {
       }
     }
 
+    if (!Array.isArray(report.dispatchedDepts)) report.dispatchedDepts = [];
+    if (!report.dispatchedDepts.includes(department)) report.dispatchedDepts.push(department);
+    report.updatedAt = new Date();
+    await recordDisasterEvent(report, 'incident', 'department-dispatched', {
+      department: dispatchDoc.department,
+      teamSize: dispatchDoc.teamSize,
+      equipment: dispatchDoc.equipment,
+      status: dispatchDoc.status
+    });
+
     res.status(201).json({
       ok: true,
       dispatch: dispatchDoc,
@@ -606,7 +620,11 @@ async function dispatchDepartment(req, res) {
     });
   } catch (err) {
     console.error('dispatchDepartment error:', err);
-    res.status(500).json({ error: 'Failed to dispatch official department' });
+    res.status(err.code === 'CLICKHOUSE_WRITE_FAILED' ? 503 : 500).json({
+      error: err.code === 'CLICKHOUSE_WRITE_FAILED'
+        ? 'The department was dispatched, but the analytics event could not be stored.'
+        : 'Failed to dispatch official department'
+    });
   }
 }
 
@@ -724,6 +742,8 @@ async function assignVolunteer(req, res) {
     }
     const volunteerName = volunteer ? volunteer.name : 'Assigned Volunteer';
     const volunteerPhone = volunteer ? volunteer.phone : '';
+    let analyticsRecord;
+    let analyticsRecordType;
 
     if (targetType === 'sos') {
       const col = getCollection('resourceRequests');
@@ -742,6 +762,13 @@ async function assignVolunteer(req, res) {
         const proximityError = checkVolunteerProximity(sosItem, volunteer);
         if (proximityError) return res.status(400).json(proximityError);
         await col.updateOne({ _id: queryId }, { $set: { assignedVolunteerId: volunteerId, assignedVolunteerName: volunteerName, assignedVolunteerPhone: volunteerPhone, status: 'assigned', updatedAt: new Date() } });
+        Object.assign(sosItem, {
+          assignedVolunteerId: volunteerId,
+          assignedVolunteerName: volunteerName,
+          assignedVolunteerPhone: volunteerPhone,
+          status: 'assigned',
+          updatedAt: new Date()
+        });
       } else {
         sosItem = memoryStore.resourceRequests.find(r => r._id.toString() === targetId.toString());
         if (!sosItem) return res.status(404).json({ error: 'SOS request not found.' });
@@ -759,6 +786,8 @@ async function assignVolunteer(req, res) {
         sosItem.status = 'assigned';
         sosItem.updatedAt = new Date();
       }
+      analyticsRecord = sosItem;
+      analyticsRecordType = 'sos';
     } else {
       const col = getCollection('disasterReports');
       let incident;
@@ -778,6 +807,12 @@ async function assignVolunteer(req, res) {
         const proximityError = checkVolunteerProximity(incident, volunteer);
         if (proximityError) return res.status(400).json(proximityError);
         await col.updateOne({ _id: queryId }, { $set: { assignedVolunteerId: volunteerId, assignedVolunteerName: volunteerName, assignedVolunteerPhone: volunteerPhone, updatedAt: new Date() } });
+        Object.assign(incident, {
+          assignedVolunteerId: volunteerId,
+          assignedVolunteerName: volunteerName,
+          assignedVolunteerPhone: volunteerPhone,
+          updatedAt: new Date()
+        });
       } else {
         const inc = memoryStore.incidents.find(i => i._id.toString() === targetId.toString());
         if (!inc || inc.status !== 'verified' || inc.published !== true) {
@@ -795,13 +830,21 @@ async function assignVolunteer(req, res) {
         inc.assignedVolunteerName = volunteerName;
         inc.assignedVolunteerPhone = volunteerPhone;
         inc.updatedAt = new Date();
+        incident = inc;
       }
+      analyticsRecord = incident;
+      analyticsRecordType = 'incident';
     }
 
+    await recordDisasterEvent(analyticsRecord, analyticsRecordType, 'volunteer-assigned');
     res.json({ ok: true, message: `Volunteer "${volunteerName}" assigned to disaster task!` });
   } catch (err) {
     console.error('assignVolunteer error:', err);
-    res.status(500).json({ error: 'Failed to assign volunteer' });
+    res.status(err.code === 'CLICKHOUSE_WRITE_FAILED' ? 503 : 500).json({
+      error: err.code === 'CLICKHOUSE_WRITE_FAILED'
+        ? 'The volunteer was assigned, but the analytics event could not be stored.'
+        : 'Failed to assign volunteer'
+    });
   }
 }
 
@@ -858,6 +901,23 @@ async function createRequest(req, res) {
     // AUTOMATED ENGINE: Match nearest volunteer in same district & state
     const matchTarget = { ...reqDoc, location: reqDoc.locationPoint };
     const autoMatch = await autoMatchAndAssignVolunteer('sos', matchTarget);
+    if (autoMatch) {
+      reqDoc.assignedVolunteerId = autoMatch.volunteerId;
+      reqDoc.assignedVolunteerName = autoMatch.volunteerName;
+      reqDoc.assignedVolunteerPhone = autoMatch.volunteerPhone;
+      reqDoc.assignedVolunteerSkills = autoMatch.volunteerSkills;
+      reqDoc.autoAssigned = true;
+      reqDoc.status = 'assigned';
+      reqDoc.updatedAt = new Date();
+    }
+    await notifyNearbyVolunteers(reqDoc, {
+      title: `SOS: ${reqDoc.type}`,
+      body: reqDoc.details,
+      sourceRequestId: reqDoc._id,
+      autoAssignedVolunteerId: autoMatch?.volunteerId || null,
+      severity: 'critical'
+    });
+    await recordDisasterEvent(reqDoc, 'sos', 'submitted');
 
     res.status(201).json({
       ok: true,
@@ -869,7 +929,11 @@ async function createRequest(req, res) {
     });
   } catch (err) {
     console.error('createRequest error:', err);
-    res.status(500).json({ error: 'Failed to submit SOS request' });
+    res.status(err.code === 'CLICKHOUSE_WRITE_FAILED' ? 503 : 500).json({
+      error: err.code === 'CLICKHOUSE_WRITE_FAILED'
+        ? 'The SOS request was received but its analytics event could not be stored. Please contact support before retrying.'
+        : 'Failed to submit SOS request'
+    });
   }
 }
 
@@ -905,10 +969,27 @@ async function listNearbyVolunteers(req, res) {
   try {
     const sessionDistrict = (req.session?.role === 'government') ? req.session.district : null;
     const sessionState = (req.session?.role === 'government') ? req.session.state : null;
-    const { district, state, skill } = req.query;
+    const { district, state, skill, lat, lng, radiusKm } = req.query;
 
     const filterDistrict = district || sessionDistrict;
     const filterState = state || sessionState;
+    const searchLat = Number(lat);
+    const searchLng = Number(lng);
+    const hasLocationSearch = Number.isFinite(searchLat) && Number.isFinite(searchLng);
+    const searchRadiusKm = Math.min(Math.max(Number(radiusKm) || VOLUNTEER_ASSIGNMENT_RADIUS_KM, 1), 50);
+
+    const filterByLocation = volunteers => volunteers
+      .map(volunteer => {
+        if (!hasLocationSearch) return { volunteer, distanceKm: null };
+        const coordinates = getCoordinates(volunteer);
+        if (!coordinates) return null;
+        return {
+          volunteer,
+          distanceKm: haversineDistance(searchLat, searchLng, coordinates.lat, coordinates.lng)
+        };
+      })
+      .filter(entry => entry && (!hasLocationSearch || entry.distanceKm <= searchRadiusKm))
+      .sort((a, b) => (a.distanceKm ?? Infinity) - (b.distanceKm ?? Infinity));
 
     const col = getCollection('users');
     if (col) {
@@ -917,7 +998,8 @@ async function listNearbyVolunteers(req, res) {
       if (skill) {
         volunteers = volunteers.filter(v => v.skills && v.skills.some(s => s.toLowerCase().includes(skill.toLowerCase())));
       }
-      return res.json({ volunteers, filterDistrict, filterState });
+      const results = filterByLocation(volunteers);
+      return res.json({ volunteers: results.map(({ volunteer, distanceKm }) => ({ ...volunteer, distanceKm })), filterDistrict, filterState, searchRadiusKm });
     }
 
     let volunteers = memoryStore.users.filter(u => u.role === 'volunteer' && u.status === 'approved');
@@ -928,8 +1010,11 @@ async function listNearbyVolunteers(req, res) {
       volunteers = volunteers.filter(v => v.skills && v.skills.some(s => s.toLowerCase().includes(skill.toLowerCase())));
     }
 
-    const safeVolunteers = volunteers.map(({ passwordHash, password, idProofNumber, ...rest }) => rest);
-    res.json({ volunteers: safeVolunteers, filterDistrict, filterState });
+    const safeVolunteers = filterByLocation(volunteers).map(({ volunteer, distanceKm }) => {
+      const { passwordHash, password, idProofNumber, ...safeVolunteer } = volunteer;
+      return { ...safeVolunteer, distanceKm };
+    });
+    res.json({ volunteers: safeVolunteers, filterDistrict, filterState, searchRadiusKm });
   } catch (err) {
     res.status(500).json({ error: 'Failed to search nearby volunteers' });
   }
@@ -979,6 +1064,8 @@ async function updateVolunteerTaskStatus(req, res) {
     const storedStatus = type === 'sos'
       ? normalizedStatus
       : (normalizedStatus === 'en route' ? 'En Route' : normalizedStatus === 'fulfilled' ? 'Fulfilled' : 'assigned');
+    let analyticsRecord = null;
+    const analyticsRecordType = type === 'sos' ? 'sos' : 'incident';
 
     if (type === 'sos') {
       const col = getCollection('resourceRequests');
@@ -986,11 +1073,13 @@ async function updateVolunteerTaskStatus(req, res) {
         const { ObjectId } = require('mongodb');
         const queryId = ObjectId.isValid(taskId) ? new ObjectId(taskId) : taskId;
         await col.updateOne({ _id: queryId, assignedVolunteerId: req.session.userId }, { $set: { status: storedStatus, updatedAt: new Date() } });
+        analyticsRecord = await col.findOne({ _id: queryId, assignedVolunteerId: req.session.userId });
       } else {
         const reqItem = memoryStore.resourceRequests.find(r => r._id.toString() === taskId.toString() && r.assignedVolunteerId === req.session.userId);
         if (reqItem) {
           reqItem.status = storedStatus;
           reqItem.updatedAt = new Date();
+          analyticsRecord = reqItem;
         }
       }
     } else {
@@ -999,25 +1088,33 @@ async function updateVolunteerTaskStatus(req, res) {
         const { ObjectId } = require('mongodb');
         const queryId = ObjectId.isValid(taskId) ? new ObjectId(taskId) : taskId;
         await col.updateOne({ _id: queryId, assignedVolunteerId: req.session.userId }, { $set: { volunteerStatus: status, updatedAt: new Date() } });
+        analyticsRecord = await col.findOne({ _id: queryId, assignedVolunteerId: req.session.userId });
       } else {
         const inc = memoryStore.incidents.find(i => i._id.toString() === taskId.toString() && i.assignedVolunteerId === req.session.userId);
         if (inc) {
           inc.volunteerStatus = status;
           inc.updatedAt = new Date();
+          analyticsRecord = inc;
         }
       }
     }
 
+    if (!analyticsRecord) {
+      return res.status(404).json({ error: 'Assigned task not found.' });
+    }
+    await recordDisasterEvent(analyticsRecord, analyticsRecordType, 'volunteer-status-updated');
     res.json({ ok: true, message: `Task status updated to "${status}"!` });
   } catch (err) {
-    res.status(500).json({ error: 'Failed to update task status' });
+    console.error('updateVolunteerTaskStatus error:', err);
+    res.status(err.code === 'CLICKHOUSE_WRITE_FAILED' ? 503 : 500).json({
+      error: err.code === 'CLICKHOUSE_WRITE_FAILED'
+        ? 'Task status changed, but the analytics event could not be stored.'
+        : 'Failed to update task status'
+    });
   }
 }
 
 module.exports = {
-  listOfficialOfficers,
-  addOfficialOfficer,
-  removeOfficialOfficer,
   applyReport,
   listReports,
   listPublishedIncidents,

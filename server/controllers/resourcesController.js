@@ -13,11 +13,11 @@ async function getNearbyResources(req, res) {
 }
 
 async function createResource(req, res) {
-  const { name, type, phones, address, location } = req.body;
+  const { name, type, phones, address, district, state, location } = req.body;
   if (!name || !type || !location || location.type !== "Point" || !buildLocationPoint(location.coordinates?.[1], location.coordinates?.[0])) {
     return res.status(400).json({ error: "Invalid resource payload" });
   }
-  const doc = { name, type, phones, address, location };
+  const doc = { name, type, phones, address, district, state, location };
   await resourceModel.insertResource(doc);
   res.json({ ok: true });
 }

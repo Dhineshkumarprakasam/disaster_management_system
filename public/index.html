@@ -36,10 +36,14 @@
         </div>
       </div>
 
+      <div id="instance-indicator" class="instance-indicator" role="status" aria-live="polite">
+        Serving instance: checking…
+      </div>
+
       <!-- Auth State Control (Login / Logout) -->
       <div id="auth-nav-container">
         <!-- Rendered dynamically by JS based on actual login session -->
-        <button class="btn btn-primary" onclick="openLoginModal()">Official / Staff Sign In</button>
+        <button class="btn btn-primary" onclick="openLoginModal()">Admin / Volunteer Sign In</button>
       </div>
     </div>
   </header>
@@ -64,7 +68,7 @@
       <div class="grid-2" style="margin-bottom:20px;">
         <div class="card-box" style="background:#fff7ed; border-color:#fed7aa; text-align:center;">
           <h3 style="color:#c2410c; margin-bottom:6px;">Witnessed a Disaster Incident?</h3>
-          <p style="font-size:0.85rem; color:#9a3412; margin-bottom:12px;">Report disaster events for official government validation and emergency team response.</p>
+          <p style="font-size:0.85rem; color:#9a3412; margin-bottom:12px;">Report disaster events for automated verification and emergency team response.</p>
           <button class="btn btn-saffron" onclick="openReportModal()">Report Disaster Incident</button>
         </div>
 
@@ -105,7 +109,7 @@
         <div class="grid-2">
           <div>
             <h4 style="font-size:0.95rem; margin-bottom:6px;">Contact Local Verified Volunteers</h4>
-            <p style="font-size:0.82rem; color:var(--text-muted); margin-bottom:10px;">Find government-approved active volunteers in your district.</p>
+            <p style="font-size:0.82rem; color:var(--text-muted); margin-bottom:10px;">Find active volunteers in your district.</p>
             <button class="btn btn-outline btn-sm" onclick="openVolunteersDirectoryModal()">Browse Volunteers Directory</button>
           </div>
           <div>
@@ -125,37 +129,55 @@
       <div class="role-banner">
         <div>
           <h2 id="admin-welcome-text">Super Admin Command Center</h2>
-          <div style="font-size:0.82rem; opacity:0.9;">Sole administrative authority to manage official officers & system accounts</div>
+          <div style="font-size:0.82rem; opacity:0.9;">Administrative authority for system accounts and operational resources</div>
         </div>
         <button class="btn btn-outline btn-sm" onclick="handleLogout()">Sign Out</button>
       </div>
 
-      <div class="grid-2">
-        <!-- Manage Official Officers (Add & Remove Officers) -->
-        <div class="card-box">
-          <div class="card-title-bar">
-            <h3>Official Department Officers List</h3>
-            <button class="btn btn-saffron btn-sm" onclick="openAddOfficerModal()">+ Add Officer</button>
+      <section class="card-box" id="admin-disaster-dashboard" aria-labelledby="admin-disaster-dashboard-title">
+        <div class="card-title-bar">
+          <div>
+            <h3 id="admin-disaster-dashboard-title">Live Disaster Dashboard</h3>
+            <div style="font-size:0.82rem; color:var(--text-muted);">Incident and SOS activity · refreshes every 5 seconds</div>
           </div>
+          <div id="admin-dashboard-status" role="status" aria-live="polite" style="font-size:0.8rem; color:var(--text-muted);">Connecting to analytics...</div>
+        </div>
+        <div class="grid-2" style="grid-template-columns:repeat(auto-fit,minmax(135px,1fr)); gap:10px; margin:12px 0 18px;">
+          <div class="card-box"><div class="small text-muted">Total records</div><strong class="fs-3" id="admin-dashboard-total">—</strong></div>
+          <div class="card-box"><div class="small text-muted">Incident reports</div><strong class="fs-3" id="admin-dashboard-incidents">—</strong></div>
+          <div class="card-box"><div class="small text-muted">SOS requests</div><strong class="fs-3 text-danger" id="admin-dashboard-sos">—</strong></div>
+          <div class="card-box"><div class="small text-muted">Verified</div><strong class="fs-3 text-success" id="admin-dashboard-verified">—</strong></div>
+          <div class="card-box"><div class="small text-muted">Pending</div><strong class="fs-3 text-warning" id="admin-dashboard-pending">—</strong></div>
+          <div class="card-box"><div class="small text-muted">Rejected</div><strong class="fs-3 text-danger" id="admin-dashboard-rejected">—</strong></div>
+          <div class="card-box"><div class="small text-muted">Published</div><strong class="fs-3 text-primary" id="admin-dashboard-published">—</strong></div>
+        </div>
+        <div class="grid-2">
+          <div class="card-box">
+            <h4>Records by severity</h4>
+            <div id="admin-dashboard-severity" style="font-size:0.85rem; color:var(--text-muted);">Loading...</div>
+          </div>
+          <div class="card-box">
+            <h4>Top affected districts</h4>
+            <div id="admin-dashboard-districts" style="font-size:0.85rem; color:var(--text-muted);">Loading...</div>
+          </div>
+        </div>
+        <div class="card-box" style="margin-top:12px;">
+          <h4>Disaster record volume · last 7 days</h4>
+          <div id="admin-dashboard-daily" style="display:flex; align-items:flex-end; gap:10px; height:120px;"></div>
+        </div>
+        <div class="card-box" style="margin-top:12px;">
+          <h4>Recent disaster activity</h4>
           <div style="overflow-x:auto;">
-            <table class="table-minimal">
-              <thead>
-                <tr>
-                  <th>Officer Name</th>
-                  <th>Department</th>
-                  <th>Designation</th>
-                  <th>Phone</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody id="admin-officers-tbody">
-                <!-- Dynamic officer rows -->
-              </tbody>
+            <table class="table table-sm table-hover align-middle mb-0">
+              <thead><tr><th>Time</th><th>Record type</th><th>Event</th><th>Details</th><th>Category</th><th>Severity</th><th>District / state</th><th>Status</th></tr></thead>
+              <tbody id="admin-dashboard-recent"></tbody>
             </table>
           </div>
         </div>
+      </section>
 
-        <!-- Create Govt Staff / Admin Accounts -->
+      <div class="grid-2">
+        <!-- Create Admin Accounts -->
         <div class="card-box">
           <div class="card-title-bar">
             <h3>Create Official Staff / Admin Account</h3>
@@ -164,7 +186,6 @@
             <div class="form-group" style="margin-bottom:10px;">
               <label class="form-label">Role Type *</label>
               <select id="acc-role" class="form-select">
-                <option value="government">Government Staff / Officer</option>
                 <option value="admin">Super Admin</option>
               </select>
             </div>
@@ -206,6 +227,66 @@
           </form>
         </div>
       </div>
+
+      <section class="card-box" aria-labelledby="resource-management-title">
+        <div class="card-title-bar">
+          <h3 id="resource-management-title">Emergency Resources &amp; Shelters</h3>
+          <button type="button" id="resource-form-reset" class="btn btn-outline btn-sm">Add Resource</button>
+        </div>
+        <form id="resource-form" class="mb-3">
+          <input type="hidden" id="resource-id">
+          <div class="grid-2" style="margin-bottom:10px;">
+            <div>
+              <label class="form-label" for="resource-name">Resource name *</label>
+              <input id="resource-name" class="form-control" required maxlength="120">
+            </div>
+            <div>
+              <label class="form-label" for="resource-type">Type *</label>
+              <select id="resource-type" class="form-select" required>
+                <option value="shelter">Emergency shelter</option>
+                <option value="hospital">Hospital</option>
+                <option value="rescue">Rescue center</option>
+                <option value="food">Food and water</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+          </div>
+          <div class="grid-2" style="margin-bottom:10px;">
+            <div>
+              <label class="form-label" for="resource-district">District</label>
+              <input id="resource-district" class="form-control" maxlength="100">
+            </div>
+            <div>
+              <label class="form-label" for="resource-state">State</label>
+              <input id="resource-state" class="form-control" maxlength="100">
+            </div>
+          </div>
+          <div class="grid-2" style="margin-bottom:10px;">
+            <div>
+              <label class="form-label" for="resource-address">Address / landmark *</label>
+              <input id="resource-address" class="form-control" required maxlength="300">
+            </div>
+            <div>
+              <label class="form-label" for="resource-phones">Contact numbers</label>
+              <input id="resource-phones" class="form-control" placeholder="Comma-separated phone numbers">
+            </div>
+          </div>
+          <label class="form-label" for="resource-map">Pin the resource location *</label>
+          <div class="map-picker" id="resource-map"></div>
+          <div class="map-picker-status" id="resource-map-status">Click the map to set the resource location.</div>
+          <div class="d-flex gap-2 mt-2">
+            <button type="submit" class="btn btn-primary" id="resource-submit">Save Resource</button>
+            <button type="button" class="btn btn-outline" id="resource-cancel" hidden>Cancel edit</button>
+          </div>
+        </form>
+        <div id="admin-resources-status" class="small text-muted mb-2" role="status"></div>
+        <div class="table-responsive">
+          <table class="table table-sm table-hover align-middle mb-0">
+            <thead><tr><th>Name</th><th>Type</th><th>District / State</th><th>Address</th><th>Phone</th><th>Actions</th></tr></thead>
+            <tbody id="admin-resources-list"></tbody>
+          </table>
+        </div>
+      </section>
     </div>
 
 
@@ -495,8 +576,8 @@
                 <input type="text" id="vapp-district" class="form-control" placeholder="Select on map" readonly required>
             </div>
             <div>
-              <label class="form-label">Govt ID Proof Number *</label>
-              <input type="text" id="vapp-idnum" class="form-control" placeholder="Aadhaar / Voter ID" required>
+              <label class="form-label">Skills *</label>
+              <input type="text" id="vapp-skills" class="form-control" placeholder="Medical First Aid, Search & Rescue" required>
             </div>
           </div>
           <div style="margin-bottom:12px;">
@@ -510,10 +591,6 @@
             <button type="button" class="btn btn-outline btn-sm map-locate-button" onclick="locateMap('vol')">Use my current location</button>
             <div class="map-picker-status" id="vol-map-status">Click the map or use your current location.</div>
             <input type="hidden" id="vapp-state" value="">
-          </div>
-          <div style="margin-bottom:12px;">
-            <label class="form-label">Skills *</label>
-            <input type="text" id="vapp-skills" class="form-control" placeholder="Medical First Aid, Search & Rescue" required>
           </div>
           <button type="submit" class="btn btn-saffron" style="width:100%;">Submit Volunteer Application</button>
         </form>
@@ -533,7 +610,6 @@
           <div style="margin-bottom:10px;">
             <label class="form-label">Account Role</label>
             <select id="log-role" class="form-select">
-              <option value="government">Government Official</option>
               <option value="admin">Super Admin</option>
               <option value="volunteer">Volunteer</option>
             </select>
@@ -552,54 +628,31 @@
     </div>
   </div>
 
-  <!-- 5. Add Officer Modal -->
-  <div class="modal-overlay" id="modal-add-officer">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h3>Add Official Officer</h3>
-        <button style="border:none; background:none; cursor:pointer;" onclick="closeAddOfficerModal()">✕</button>
-      </div>
-      <div class="modal-body">
-        <form id="officer-form" onsubmit="submitOfficerForm(event)">
-          <div style="margin-bottom:10px;">
-            <label class="form-label">Officer Name *</label>
-            <input type="text" id="off-name" class="form-control" placeholder="e.g. Commandant Rakesh Verma" required>
-          </div>
-          <div style="margin-bottom:10px;">
-            <label class="form-label">Department *</label>
-            <select id="off-dept" class="form-select">
-              <option value="NDRF (National Disaster Response Force)">NDRF</option>
-              <option value="Police Department">Police Department (112)</option>
-              <option value="Fire & Rescue Service">Fire Service (101)</option>
-              <option value="Ambulance & Medical Emergency">Ambulance Emergency (108)</option>
-            </select>
-          </div>
-          <div class="grid-2" style="margin-bottom:12px;">
-            <div>
-              <label class="form-label">Designation *</label>
-              <input type="text" id="off-rank" class="form-control" placeholder="Commander / SHO" required>
-            </div>
-            <div>
-              <label class="form-label">Phone *</label>
-              <input type="tel" id="off-phone" class="form-control" placeholder="+91 99887 76655" required>
-            </div>
-          </div>
-          <button type="submit" class="btn btn-success" style="width:100%;">+ Add Officer</button>
-        </form>
-      </div>
-    </div>
-  </div>
-
-  <!-- 6. Volunteers Directory Modal -->
+  <!-- 5. Volunteers Directory Modal -->
   <div class="modal-overlay" id="modal-volunteers-dir">
     <div class="modal-content" style="max-width:650px;">
       <div class="modal-header">
         <h3>Verified Active Volunteers Directory</h3>
         <button style="border:none; background:none; cursor:pointer;" onclick="closeVolunteersDirectoryModal()">✕</button>
       </div>
-      <div class="modal-body" style="max-height:70vh; overflow-y:auto;" id="volunteers-directory-list">
-        <!-- Dynamic list -->
+      <div class="modal-body" style="max-height:78vh; overflow-y:auto;">
+        <div class="map-search-row">
+          <input type="text" id="vol-dir-pincode" class="form-control" inputmode="numeric" maxlength="6" placeholder="Search by 6-digit pincode">
+          <button type="button" class="btn btn-primary" onclick="searchMapByPincode('dir')">Search location</button>
+        </div>
+        <div class="map-search-results" id="dir-map-results"></div>
+        <div class="map-picker" id="dir-map"></div>
+        <button type="button" class="btn btn-outline btn-sm map-locate-button" onclick="locateDirectoryVolunteers()">Use my current location</button>
+        <div class="map-picker-status" id="dir-map-status">Click the map or search a location to find volunteers within 3 km.</div>
+        <div id="volunteers-directory-list" style="margin-top:12px;">Select a location to search for volunteers.</div>
       </div>
+    </div>
+  </div>
+
+  <div id="submission-loading" class="submission-loading" role="status" aria-live="polite" aria-hidden="true">
+    <div class="submission-loading-card">
+      <div class="submission-spinner" aria-hidden="true"></div>
+      <p id="submission-loading-message">Submitting your request...</p>
     </div>
   </div>
 

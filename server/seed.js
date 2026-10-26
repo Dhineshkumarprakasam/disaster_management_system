@@ -27,22 +27,9 @@ async function seed() {
     createdAt: new Date(),
   });
 
-  // ===== Users (Govt Official & Approved Volunteer) =====
+  // ===== Users (Approved Volunteer) =====
   await db.collection('users').deleteMany({});
   await db.collection('users').insertMany([
-    {
-      username: "official",
-      passwordHash: await bcrypt.hash("official123", 10),
-      name: "Shri Rajesh Kumar (IAS)",
-      phone: "+91 98765 43210",
-      email: "rajesh.kumar@ndma.gov.in",
-      department: "Disaster Management Authority",
-      role: "government",
-      status: "approved",
-      district: "Kamrup Metropolitan (Guwahati)",
-      state: "Assam",
-      createdAt: new Date()
-    },
     {
       username: "volunteer",
       passwordHash: await bcrypt.hash("volunteer123", 10),
@@ -59,29 +46,6 @@ async function seed() {
       district: "Kamrup Metropolitan (Guwahati)",
       state: "Assam",
       locationPoint: { type: "Point", coordinates: [91.6980, 26.1600] },
-      createdAt: new Date()
-    }
-  ]);
-
-  // ===== Official Officers =====
-  await db.collection('officialOfficers').deleteMany({});
-  await db.collection('officialOfficers').insertMany([
-    {
-      name: "Inspector Vikram Singh",
-      department: "Police Department",
-      designation: "Station House Officer",
-      phone: "+91 99887 76655",
-      district: "Kamrup Metropolitan (Guwahati)",
-      badgeNo: "POL-AS-8492",
-      createdAt: new Date()
-    },
-    {
-      name: "Commandant Rakesh Verma",
-      department: "NDRF (National Disaster Response Force)",
-      designation: "1st Battalion Commander",
-      phone: "+91 94350 11223",
-      district: "Kamrup Metropolitan (Guwahati)",
-      badgeNo: "NDRF-BN1-091",
       createdAt: new Date()
     }
   ]);
@@ -150,7 +114,7 @@ async function seed() {
     await db.collection('disasterReports').createIndex({ status: 1, createdAt: -1 });
   } catch (e) {}
 
-  console.log("✅ Seeded MongoDB database successfully with Super Admin, Govt Official, Volunteer, Official Officers, Resources, and Incidents.");
+  console.log("✅ Seeded MongoDB database successfully with Super Admin, Volunteers, Resources, and Incidents.");
   process.exit(0);
 }
 

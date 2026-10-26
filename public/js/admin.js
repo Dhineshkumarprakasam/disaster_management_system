@@ -53,6 +53,8 @@ let adminInfo = null;
 let resourceMap = null;
 let resourceMarker = null;
 let resourceCoordinates = null;
+let dashboardPollTimer = null;
+let dashboardLoading = false;
 
 function setResourcePoint(lat, lng) {
   resourceCoordinates = { lat, lng };
@@ -86,13 +88,12 @@ function initResourceMap() {
 $(function () {
   const loginConfig = {
     '/admin/login': { role: 'admin', url: '/api/auth/admin/login', title: 'Administrator sign in', copy: 'Platform administration, official account management, and system oversight.', button: 'Sign in as administrator', className: 'btn-primary' },
-    '/government/login': { role: 'government', url: '/api/auth/government/login', title: 'Government official sign in', copy: 'Verify incidents, approve volunteers, coordinate resources, and manage active response.', button: 'Sign in as government official', className: 'btn-success' },
     '/volunteer/login': { role: 'volunteer', url: '/api/auth/volunteer/login', title: 'Volunteer sign in', copy: 'View assigned relief requests and report completed response work.', button: 'Sign in as volunteer', className: 'btn-warning' }
   };
   const config = loginConfig[window.location.pathname] || loginConfig['/admin/login'];
   $('#login-copy').html(`<h3>${config.title}</h3><p class="text-muted">${config.copy}</p>`);
   $('#login-submit').text(config.button).addClass(config.className);
-  $('#login-switcher').html(`<span class="text-muted">Other access:</span> <a href="/admin/login">Administrator</a> <a href="/government/login">Government official</a> <a href="/volunteer/login">Volunteer</a>`);
+  $('#login-switcher').html(`<span class="text-muted">Other access:</span> <a href="/admin/login">Administrator</a> <a href="/volunteer/login">Volunteer</a>`);
   checkSession();
 
   function checkSession() {
@@ -104,10 +105,10 @@ $(function () {
         $('#admin-dashboard').removeClass('d-none');
         $('#admin-logout').removeClass('d-none');
         $('#role-banner').text(`Signed in as ${adminInfo.name} (${adminInfo.role})`);
-        if (adminInfo.role === 'admin') $('#government-form-card').removeClass('d-none');
-        if (adminInfo.role === 'admin' || adminInfo.role === 'government') {
-          $('#workflow-section').removeClass('d-none');
-          loadWorkflows();
+        $('#government-form-card, #workflow-section').addClass('d-none');
+        if (adminInfo.role === 'admin') {
+          $('#disaster-dashboard').removeClass('d-none');
+          startDashboardUpdates();
         }
         if (adminInfo.role === 'volunteer') {
           $('#btn-add-message, #btn-add-resource, #messages-table, #resources-table, #admins-table').addClass('d-none');
@@ -151,6 +152,104 @@ $(function () {
     loadMessages();
     loadResources();
     loadAdmins();
+  }
+
+  function startDashboardUpdates() {
+    if (dashboardPollTimer) return;
+    loadDashboard();
+    dashboardPollTimer = setInterval(function () {
+      if (!document.hidden) loadDashboard();
+    }, 5000);
+  }
+
+  function formatDashboardTime(value) {
+    const timestamp = String(value || '').replace(' ', 'T');
+    const date = new Date(/[zZ]|[+-]\d\d:\d\d$/.test(timestamp) ? timestamp : `${timestamp}Z`);
+    return Number.isNaN(date.getTime()) ? String(value || '—') : date.toLocaleString();
+  }
+
+  function renderDashboardBreakdown(selector, rows, label) {
+    const container = $(selector).empty();
+    if (!rows.length) {
+      container.text('No incident data yet.');
+      return;
+    }
+    const maximum = Math.max(...rows.map(item => item.count), 1);
+    rows.forEach(function (item) {
+      const line = $('<div class="mb-2">');
+      line.append($('<div class="d-flex justify-content-between">')
+        .append($('<span>').text(label(item)))
+        .append($('<span>').text(item.count)));
+      const track = $('<div class="progress" style="height:6px">');
+      track.append($('<div class="progress-bar">').css('width', `${Math.max(2, item.count / maximum * 100)}%`));
+      line.append(track);
+      container.append(line);
+    });
+  }
+
+  function renderDashboard(data) {
+    const metrics = data.metrics || {};
+    $('#dashboard-total').text(metrics.total ?? 0);
+    $('#dashboard-incidents').text(metrics.incidents ?? 0);
+    $('#dashboard-sos').text(metrics.sos_requests ?? 0);
+    $('#dashboard-verified').text(metrics.verified ?? 0);
+    $('#dashboard-pending').text(metrics.pending ?? 0);
+    $('#dashboard-rejected').text(metrics.rejected ?? 0);
+    $('#dashboard-published').text(metrics.published ?? 0);
+    renderDashboardBreakdown('#dashboard-severity', data.severity || [], item => item.severity || 'Unknown');
+    renderDashboardBreakdown('#dashboard-districts', data.districts || [], item =>
+      [item.district, item.state].filter(Boolean).join(', ') || 'Unknown location');
+
+    const daily = data.daily || [];
+    const dailyMax = Math.max(...daily.map(item => item.count), 1);
+    const dailyContainer = $('#dashboard-daily').empty();
+    daily.forEach(function (item) {
+      const dateLabel = String(item.date || '').slice(5);
+      const column = $('<div class="d-flex flex-column align-items-center justify-content-end flex-fill h-100">');
+      column.append($('<span class="small">').text(item.count));
+      column.append($('<div class="bg-primary rounded-top w-100 mt-1">')
+        .css('height', `${Math.max(2, item.count / dailyMax * 76)}px`));
+      column.append($('<span class="small text-muted mt-1">').text(dateLabel));
+      dailyContainer.append(column);
+    });
+    if (!daily.length) dailyContainer.text('No incident data for this period.');
+
+    const recentContainer = $('#dashboard-recent').empty();
+    (data.recent || []).forEach(function (item) {
+      const row = $('<tr>');
+      [
+        formatDashboardTime(item.event_time),
+        item.record_type === 'sos' ? 'SOS request' : 'Incident report',
+        String(item.event_type || '').replace(/-/g, ' '),
+        item.title,
+        item.category,
+        item.severity,
+        [item.district, item.state].filter(Boolean).join(', '),
+        item.volunteer_status || item.status
+      ].forEach(value => row.append($('<td>').text(value || '—')));
+      recentContainer.append(row);
+    });
+    if (!data.recent?.length) {
+      recentContainer.append($('<tr>').append(
+        $('<td colspan="8" class="text-center text-muted py-4">').text('No disaster activity has been recorded yet.')
+      ));
+    }
+    $('#dashboard-status').removeClass('text-danger').text(`Live · updated ${new Date().toLocaleTimeString()}`);
+  }
+
+  function loadDashboard() {
+    if (dashboardLoading) return;
+    dashboardLoading = true;
+    $.get('/api/admin/disaster-dashboard')
+      .done(renderDashboard)
+      .fail(function (xhr) {
+        $('#dashboard-status').addClass('text-danger').text(
+          xhr.responseJSON?.error || 'Unable to load disaster analytics.'
+        );
+      })
+      .always(function () {
+        dashboardLoading = false;
+      });
   }
 
   // Messages CRUD
@@ -362,15 +461,6 @@ $(function () {
       });
     });
   }
-
-  $('#government-form').submit(function (event) {
-    event.preventDefault();
-    const payload = {};
-    $(this).serializeArray().forEach(field => { payload[field.name] = field.value; });
-    $.ajax({ type: 'POST', url: '/api/admin/government', data: JSON.stringify(payload), contentType: 'application/json' })
-      .done(() => $('#government-result').removeClass('text-danger').addClass('text-success').text('Official account created.'))
-      .fail(xhr => $('#government-result').removeClass('text-success').addClass('text-danger').text(xhr.responseJSON?.error || 'Could not create account.'));
-  });
 
   function loadWorkflows() {
     $.get('/api/government/volunteers', data => {
