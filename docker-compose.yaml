@@ -138,6 +138,8 @@ services:
 
   ml-verifier:
     build: ./ml-verifier
+    ports:
+      - "127.0.0.1:8001:8000"
     expose:
       - "8000"
     healthcheck:

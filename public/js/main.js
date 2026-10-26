@@ -119,6 +119,13 @@ async function reverseGeocode(key, lat, lng) {
     const district = address.state_district || address.district || address.county || '';
     const state = address.state || '';
     const displayName = data.display_name || `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+    if (key === 'resource') {
+      if (district) $('#resource-district').val(district);
+      if (state) $('#resource-state').val(state);
+      $('#resource-address').val(displayName);
+      $('#resource-map-status').text(`${displayName} (${lat.toFixed(6)}, ${lng.toFixed(6)})`);
+      return;
+    }
     const prefix = key === 'rep' ? 'rep' : key === 'sos' ? 'sos' : 'vapp';
     if (district) $('#' + prefix + '-district').val(district);
     if ($('#' + prefix + '-state').length && state) $('#' + prefix + '-state').val(state);
@@ -160,7 +167,8 @@ function getMapCoordinates(key) {
 }
 
 async function searchMapByPincode(key) {
-  const pincode = $('#' + key + '-pincode').val().trim();
+  const pincodeInputId = key === 'dir' ? 'vol-dir-pincode' : key + '-pincode';
+  const pincode = $('#' + pincodeInputId).val().trim();
   const results = $('#' + key + '-map-results');
   if (!/^\d{6}$/.test(pincode)) {
     results.text('Enter a valid 6-digit Indian pincode.');
@@ -641,8 +649,7 @@ function taskDirectionsUrl(task) {
   return `https://www.google.com/maps/${coordinates ? 'dir' : 'search'}/?api=1&${query}=${encodeURIComponent(destination)}`;
 }
 
-async function loadTaskResources(task, containerId) {
-  const container = $(`#${containerId}`);
+async function loadTaskResources(task, container) {
   const coordinates = getTaskCoordinates(task);
   try {
     let resources = [];
@@ -736,11 +743,8 @@ async function loadDirectoryVolunteers(coordinates) {
     container.html(html);
   } catch (err) {
     console.error('Failed to load volunteers directory:', err);
+    container.text('Nearby volunteers could not be loaded. Please try again.');
   }
-}
-
-function locateDirectoryVolunteers() {
-  locateMap('dir');
 }
 
 function closeVolunteersDirectoryModal() { $('#modal-volunteers-dir').removeClass('active'); }

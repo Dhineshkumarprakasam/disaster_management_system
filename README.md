@@ -150,6 +150,8 @@ The service lives in `ml-verifier/app.py`, loads `model.pkl` and `encoder.pkl` i
 - `POST /predict`: accepts `{"text": "..."}` and returns only `{"valid": true}` or `{"valid": false}`.
 - `GET /health`: returns `{ "status": "ok" }` only when the model and encoder loaded successfully; otherwise it returns HTTP 503.
 
+To try these endpoints from Postman, start the Compose services and import `postman/ML-Verifier.postman_collection.json`. The collection calls `http://localhost:8001`; the verifier port is bound to loopback only. Use the **Health check** request to confirm the model loaded, then **Predict message** with a JSON body such as `{"text":"Severe flooding has damaged homes near the river."}`. A successful prediction returns a boolean `valid` field; the model determines its value.
+
 Node calls `/predict` through `server/services/mlService.js`, sending the citizen's incident description as `text`. The application uses only the returned boolean; it does not request identity checks, confidence scores, reasons, or duplicate classifications. An unavailable verifier is logged and treated as invalid, so the report is not published.
 
 ## Developing better models

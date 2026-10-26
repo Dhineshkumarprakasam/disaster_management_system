@@ -272,7 +272,13 @@
             </div>
           </div>
           <label class="form-label" for="resource-map">Pin the resource location *</label>
+          <div class="map-search-row">
+            <input type="text" id="resource-pincode" class="form-control" inputmode="numeric" maxlength="6" placeholder="Enter 6-digit pincode">
+            <button type="button" class="btn btn-primary" onclick="searchMapByPincode('resource')">Find location</button>
+          </div>
+          <div class="map-search-results" id="resource-map-results"></div>
           <div class="map-picker" id="resource-map"></div>
+          <button type="button" class="btn btn-outline btn-sm map-locate-button" onclick="locateMap('resource')">Use my current location</button>
           <div class="map-picker-status" id="resource-map-status">Click the map to set the resource location.</div>
           <div class="d-flex gap-2 mt-2">
             <button type="submit" class="btn btn-primary" id="resource-submit">Save Resource</button>
@@ -642,7 +648,7 @@
         </div>
         <div class="map-search-results" id="dir-map-results"></div>
         <div class="map-picker" id="dir-map"></div>
-        <button type="button" class="btn btn-outline btn-sm map-locate-button" onclick="locateDirectoryVolunteers()">Use my current location</button>
+        <button type="button" class="btn btn-outline btn-sm map-locate-button" onclick="locateMap('dir')">Use my current location</button>
         <div class="map-picker-status" id="dir-map-status">Click the map or search a location to find volunteers within 3 km.</div>
         <div id="volunteers-directory-list" style="margin-top:12px;">Select a location to search for volunteers.</div>
       </div>
